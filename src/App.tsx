@@ -778,7 +778,7 @@ export default function App() {
             { alg: -257, type: "public-key" }, // RS256
           ],
           authenticatorSelection: {
-            authenticatorAttachment: "platform",
+            // Removing 'platform' allows external USB/NFC security keys and readers
             userVerification: "required",
           },
           timeout: 60000,
