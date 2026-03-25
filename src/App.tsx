@@ -550,12 +550,8 @@ export default function App() {
   const isAdminOrSuper = profile?.role === 'admin' || profile?.role === 'superviseur';
 
   const themeColor = useMemo(() => {
-    if (!user || !profile) return STATUS_COLORS.none;
-    if (isAdminOrSuper) return roleColor;
-    if (todayRecord?.status === 'present') return STATUS_COLORS.present;
-    if (todayRecord?.status === 'absent') return STATUS_COLORS.absent;
     return roleColor;
-  }, [user, profile, isAdminOrSuper, todayRecord, roleColor]);
+  }, [roleColor]);
 
   if (loading) return <LoadingScreen />;
   if (!user) return <LoginScreen />;
@@ -626,61 +622,6 @@ export default function App() {
         </header>
 
         <main className="max-w-7xl mx-auto px-4 py-8">
-          {/* Legend Section */}
-          <motion.div 
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={cn("mb-8 p-5 rounded-[2rem] border bg-white/70 backdrop-blur-md flex flex-col md:flex-row md:items-center gap-6 shadow-xl shadow-slate-200/50", `border-${themeColor.primary}/20`)}
-          >
-            <div className="flex flex-col gap-2 flex-1">
-              <div className="flex items-center gap-2">
-                <div className={cn("w-1.5 h-4 rounded-full", `bg-${themeColor.primary}`)} />
-                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Légende des Rôles (Couleurs de Base)</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-4">
-                {Object.entries(ROLE_COLORS).map(([role, colors]) => (
-                  <div key={role} className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
-                    profile?.role === role ? `bg-${colors.bg} border-${colors.primary}/30 shadow-sm` : "bg-slate-50 border-slate-100 opacity-60"
-                  )}>
-                    <div className={cn("w-2.5 h-2.5 rounded-full shadow-sm", `bg-${colors.primary}`)} />
-                    <span className={cn("text-[11px] font-bold capitalize", profile?.role === role ? `text-${colors.text}` : "text-slate-500")}>{role}</span>
-                    {profile?.role === role && <div className={cn("w-1 h-1 rounded-full animate-pulse", `bg-${colors.primary}`)} />}
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="w-px h-12 bg-slate-200 hidden md:block mx-2" />
-            
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-4 rounded-full bg-slate-400" />
-                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Statut de Présence (Thème Dynamique)</span>
-              </div>
-              <div className="flex items-center gap-6">
-                <div className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
-                  todayRecord?.status === 'present' ? "bg-green-50 border-green-500/30 shadow-sm" : "bg-slate-50 border-slate-100 opacity-60"
-                )}>
-                  <div className="w-3 h-3 rounded-lg bg-green-500 shadow-lg shadow-green-200 flex items-center justify-center">
-                    <CheckCircle2 className="w-2 h-2 text-white" />
-                  </div>
-                  <span className={cn("text-[11px] font-bold", todayRecord?.status === 'present' ? "text-green-700" : "text-slate-600")}>Présent (Thème Vert)</span>
-                </div>
-                <div className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
-                  todayRecord?.status === 'absent' ? "bg-red-50 border-red-500/30 shadow-sm" : "bg-slate-50 border-slate-100 opacity-60"
-                )}>
-                  <div className="w-3 h-3 rounded-lg bg-red-500 shadow-lg shadow-red-200 flex items-center justify-center">
-                    <XCircle className="w-2 h-2 text-white" />
-                  </div>
-                  <span className={cn("text-[11px] font-bold", todayRecord?.status === 'absent' ? "text-red-700" : "text-slate-600")}>Absent (Thème Rouge)</span>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
             {/* Left Column: Calendar & Stats */}
