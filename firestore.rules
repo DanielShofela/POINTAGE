@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (UID)
+    // Fields:
+    //   - uid: string (required) - User's unique ID
+    //   - email: string (required) - User's email
+    //   - displayName: string (optional) - User's display name
+    //   - role: string (required) - 'admin' or 'user'
+    //
+    // Collection: attendance
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - UID of the user
+    //   - date: string (required) - YYYY-MM-DD
+    //   - status: string (required) - 'present' or 'absent'
+    //   - markedBy: string (required) - UID of the admin
+    //   - timestamp: timestamp (required) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['userId', 'date', 'status', 'markedBy', 'timestamp']) &&
+             data.userId is string &&
+             data.date is string &&
+             data.status in ['present', 'absent'] &&
+             data.markedBy == request.auth.uid &&
+             data.timestamp is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      // Users can create their own profile, but only as 'user' role unless they are the default admin
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
+                    (request.resource.data.role == 'user' || isAdmin());
+      
+      // Only admins can update roles. Users can update their own displayName.
+      allow update: if isAuthenticated() && 
+                    ((isAdmin() && isValidUser(request.resource.data)) || 
+                     (isOwner(userId) && request.resource.data.role == resource.data.role && isValidUser(request.resource.data)));
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() && isValidAttendance(request.resource.data);
+      allow update: if isAdmin() && isValidAttendance(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

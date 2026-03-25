@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique user ID from Firebase Auth." },
+        "email": { "type": "string", "format": "email", "description": "User's email address." },
+        "displayName": { "type": "string", "description": "User's display name." },
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "The user's role in the system." }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Attendance record for a user on a specific date.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user whose attendance is being marked." },
+        "date": { "type": "string", "format": "date", "description": "The date for which attendance is marked (YYYY-MM-DD)." },
+        "status": { "type": "string", "enum": ["present", "absent"], "description": "The attendance status." },
+        "markedBy": { "type": "string", "description": "The UID of the admin who marked the attendance." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "The exact time the record was created." }
+      },
+      "required": ["userId", "date", "status", "markedBy", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and roles."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Attendance records."
+    }
+  }
+}
