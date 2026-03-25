@@ -22,6 +22,7 @@ import {
   Timestamp, 
   serverTimestamp, 
   addDoc,
+  updateDoc,
   OperationType,
   handleFirestoreError,
   User
@@ -38,7 +39,10 @@ import {
   ChevronRight,
   Loader2,
   ShieldCheck,
-  User as UserIcon
+  User as UserIcon,
+  Fingerprint,
+  Clock,
+  ArrowRightLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO } from 'date-fns';
@@ -56,7 +60,27 @@ interface UserProfile {
   email: string;
   displayName: string;
   role: 'admin' | 'user';
+  credentials?: {
+    id: string;
+    publicKey: string;
+    counter: number;
+  }[];
 }
+
+// --- WebAuthn Helpers ---
+
+const bufferToBase64 = (buffer: ArrayBuffer) => {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+};
+
+const base64ToBuffer = (base64: string) => {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
 
 interface AttendanceRecord {
   id: string;
@@ -64,6 +88,8 @@ interface AttendanceRecord {
   date: string; // YYYY-MM-DD
   status: 'present' | 'absent';
   markedBy: string;
+  checkIn?: Timestamp;
+  checkOut?: Timestamp;
   timestamp: Timestamp;
 }
 
@@ -115,6 +141,127 @@ const LoadingScreen = () => (
   </div>
 );
 
+const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: boolean, onClose: () => void, onVerify: () => void, type: 'check-in' | 'check-out', profile: UserProfile | null }) => {
+  const [verifying, setVerifying] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const startVerification = async () => {
+    if (!profile?.credentials?.length) {
+      setError("No fingerprint registered. Please register one in your profile first.");
+      return;
+    }
+
+    setVerifying(true);
+    setError(null);
+
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const allowCredentials = profile.credentials.map(cred => ({
+        id: base64ToBuffer(cred.id),
+        type: 'public-key' as const,
+        transports: ['internal'] as AuthenticatorTransport[],
+      }));
+
+      const credential = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          allowCredentials,
+          userVerification: 'required',
+          timeout: 60000,
+        }
+      }) as PublicKeyCredential;
+
+      if (credential) {
+        setSuccess(true);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        onVerify();
+        onClose();
+      }
+    } catch (err) {
+      console.error('Biometric verification failed:', err);
+      setError("Verification failed. Please try again.");
+    } finally {
+      setVerifying(false);
+      setSuccess(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 text-center shadow-2xl"
+          >
+            <div className="mb-6">
+              <h3 className="text-2xl font-bold text-slate-900 mb-2 capitalize">
+                {type.replace('-', ' ')}
+              </h3>
+              <p className="text-slate-500">Verify your identity with your registered fingerprint.</p>
+            </div>
+
+            <div className="relative w-32 h-32 mx-auto mb-8">
+              <motion.div 
+                animate={verifying ? { scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] } : {}}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className={cn(
+                  "absolute inset-0 rounded-full border-4 flex items-center justify-center transition-colors duration-500",
+                  success ? "border-green-500 bg-green-50" : verifying ? "border-indigo-400 bg-indigo-50" : error ? "border-red-100 bg-red-50" : "border-slate-100"
+                )}
+              >
+                {success ? (
+                  <CheckCircle2 className="w-16 h-16 text-green-500" />
+                ) : error ? (
+                  <XCircle className="w-16 h-16 text-red-500" />
+                ) : (
+                  <Fingerprint className={cn("w-16 h-16 transition-colors duration-500", verifying ? "text-indigo-600" : "text-slate-300")} />
+                )}
+              </motion.div>
+            </div>
+
+            {error && (
+              <div className="mb-6">
+                <p className="text-red-500 text-sm font-medium mb-3">{error}</p>
+                {!profile?.credentials?.length && (
+                  <p className="text-xs text-slate-400">
+                    Use the <span className="font-bold text-indigo-600">"Register Fingerprint"</span> button in the top menu to get started.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!verifying && !success && (
+              <div className="space-y-3">
+                <button 
+                  onClick={startVerification}
+                  className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all active:scale-95"
+                >
+                  {error ? "Try Again" : "Verify Fingerprint"}
+                </button>
+                <button 
+                  onClick={onClose}
+                  className="w-full text-slate-400 font-semibold py-2 hover:text-slate-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {verifying && <p className="text-indigo-600 font-bold animate-pulse">Waiting for sensor...</p>}
+            {success && <p className="text-green-600 font-bold">Identity Verified!</p>}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 const LoginScreen = () => {
   const handleLogin = async () => {
     try {
@@ -158,6 +305,8 @@ export default function App() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [isBioModalOpen, setIsBioModalOpen] = useState(false);
+  const [bioType, setBioType] = useState<'check-in' | 'check-out'>('check-in');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -248,10 +397,142 @@ export default function App() {
     }
   };
 
+  const handleSetTime = async (userId: string, type: 'checkIn' | 'checkOut') => {
+    if (!profile || profile.role !== 'admin') return;
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const existingRecord = attendance.find(r => r.userId === userId && r.date === dateStr);
+
+    try {
+      if (existingRecord) {
+        await updateDoc(doc(db, 'attendance', existingRecord.id), {
+          [type]: serverTimestamp(),
+          status: 'present',
+          timestamp: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'attendance'), {
+          userId,
+          date: dateStr,
+          status: 'present',
+          markedBy: profile.uid,
+          [type]: serverTimestamp(),
+          timestamp: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+    }
+  };
+
+  const handleSelfCheck = async () => {
+    if (!user) return;
+    const dateStr = format(new Date(), 'yyyy-MM-dd');
+    const existingRecord = attendance.find(r => r.userId === user.uid && r.date === dateStr);
+
+    try {
+      if (bioType === 'check-in') {
+        if (existingRecord) {
+          if (existingRecord.checkIn) return; // Already checked in
+          await updateDoc(doc(db, 'attendance', existingRecord.id), {
+            checkIn: serverTimestamp(),
+            status: 'present',
+            timestamp: serverTimestamp()
+          });
+        } else {
+          await addDoc(collection(db, 'attendance'), {
+            userId: user.uid,
+            date: dateStr,
+            status: 'present',
+            markedBy: 'self',
+            checkIn: serverTimestamp(),
+            timestamp: serverTimestamp()
+          });
+        }
+      } else {
+        if (!existingRecord) {
+          // Allow check-out even if no check-in record exists
+          await addDoc(collection(db, 'attendance'), {
+            userId: user.uid,
+            date: dateStr,
+            status: 'present',
+            markedBy: 'self',
+            checkOut: serverTimestamp(),
+            timestamp: serverTimestamp()
+          });
+        } else {
+          if (existingRecord.checkOut) return; // Already checked out
+          await updateDoc(doc(db, 'attendance', existingRecord.id), {
+            checkOut: serverTimestamp(),
+            status: 'present',
+            timestamp: serverTimestamp()
+          });
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+    }
+  };
+
+  const handleRegisterFingerprint = async () => {
+    if (!user || !profile) return;
+
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const userID = new TextEncoder().encode(user.uid);
+
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: {
+            name: "Attendance Tracker",
+            id: window.location.hostname,
+          },
+          user: {
+            id: userID,
+            name: user.email || user.uid,
+            displayName: profile.displayName,
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: "public-key" }, // ES256
+            { alg: -257, type: "public-key" }, // RS256
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required",
+          },
+          timeout: 60000,
+        },
+      }) as PublicKeyCredential;
+
+      if (credential) {
+        const response = credential.response as AuthenticatorAttestationResponse;
+        const newCredential = {
+          id: bufferToBase64(credential.rawId),
+          publicKey: bufferToBase64(response.getPublicKey()),
+          counter: 0,
+        };
+
+        const updatedCredentials = [...(profile.credentials || []), newCredential];
+        await updateDoc(doc(db, 'users', user.uid), {
+          credentials: updatedCredentials
+        });
+        setProfile({ ...profile, credentials: updatedCredentials });
+        alert("Fingerprint registered successfully!");
+      }
+    } catch (error) {
+      console.error('Fingerprint registration failed:', error);
+      alert("Registration failed. Make sure your device supports biometrics and you've granted permission.");
+    }
+  };
+
   const logout = () => signOut(auth);
 
   if (loading) return <LoadingScreen />;
   if (!user) return <LoginScreen />;
+
+  const todayRecord = attendance.find(r => r.userId === user.uid && r.date === format(new Date(), 'yyyy-MM-dd'));
 
   return (
     <ErrorBoundary>
@@ -267,6 +548,20 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-4">
+              {profile?.role === 'user' && (
+                <button 
+                  onClick={handleRegisterFingerprint}
+                  className={cn(
+                    "hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    profile.credentials?.length 
+                      ? "bg-green-50 text-green-600 border border-green-100" 
+                      : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"
+                  )}
+                >
+                  <Fingerprint className="w-4 h-4" />
+                  {profile.credentials?.length ? "Fingerprint Active" : "Register Fingerprint"}
+                </button>
+              )}
               <div className="flex items-center gap-2 text-sm">
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="font-semibold text-slate-700">{profile?.displayName}</span>
@@ -298,6 +593,59 @@ export default function App() {
             
             {/* Left Column: Calendar & Stats */}
             <div className="lg:col-span-4 space-y-8">
+              {/* Check-In/Out Card (User Only) */}
+              {profile?.role === 'user' && (
+                <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-indigo-100/50 border border-indigo-50 overflow-hidden relative">
+                  <div className="absolute top-0 right-0 p-4 opacity-5">
+                    <Fingerprint className="w-24 h-24" />
+                  </div>
+                  <h2 className="font-bold text-lg flex items-center gap-2 mb-6">
+                    <Clock className="w-5 h-5 text-indigo-600" />
+                    Daily Tracking
+                  </h2>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div className="text-xs text-slate-400 font-bold uppercase mb-1">Arrival</div>
+                        <div className="text-lg font-black text-slate-700">
+                          {todayRecord?.checkIn ? format(todayRecord.checkIn.toDate(), 'HH:mm') : '--:--'}
+                        </div>
+                      </div>
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div className="text-xs text-slate-400 font-bold uppercase mb-1">Departure</div>
+                        <div className="text-lg font-black text-slate-700">
+                          {todayRecord?.checkOut ? format(todayRecord.checkOut.toDate(), 'HH:mm') : '--:--'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {!todayRecord?.checkIn ? (
+                      <button 
+                        onClick={() => { setBioType('check-in'); setIsBioModalOpen(true); }}
+                        className="w-full flex items-center justify-center gap-3 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-95"
+                      >
+                        <Fingerprint className="w-5 h-5" />
+                        Check In
+                      </button>
+                    ) : !todayRecord?.checkOut ? (
+                      <button 
+                        onClick={() => { setBioType('check-out'); setIsBioModalOpen(true); }}
+                        className="w-full flex items-center justify-center gap-3 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-slate-900 transition-all shadow-lg shadow-slate-200 active:scale-95"
+                      >
+                        <Fingerprint className="w-5 h-5" />
+                        Check Out
+                      </button>
+                    ) : (
+                      <div className="w-full flex items-center justify-center gap-3 bg-green-50 text-green-600 py-4 rounded-2xl font-bold border border-green-100">
+                        <CheckCircle2 className="w-5 h-5" />
+                        Day Completed
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Calendar Card */}
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
                 <div className="flex items-center justify-between mb-6">
@@ -316,7 +664,7 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 mb-2">
-                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d}>{d}</div>)}
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={`${d}-${i}`}>{d}</div>)}
                 </div>
 
                 <div className="grid grid-cols-7 gap-1">
@@ -326,7 +674,7 @@ export default function App() {
                   }).map(day => {
                     const isSelected = isSameDay(day, selectedDate);
                     const isTodayDate = isToday(day);
-                    const record = attendance.find(r => r.userId === (profile?.role === 'admin' ? selectedDate.toString() : user.uid) && r.date === format(day, 'yyyy-MM-dd'));
+                    const record = attendance.find(r => r.userId === user.uid && r.date === format(day, 'yyyy-MM-dd'));
                     
                     return (
                       <button
@@ -416,7 +764,7 @@ export default function App() {
                       const record = attendance.find(r => r.userId === u.uid && r.date === format(selectedDate, 'yyyy-MM-dd'));
                       
                       return (
-                        <div key={u.uid} className="p-6 flex items-center justify-between hover:bg-slate-50/50 transition-colors">
+                        <div key={u.uid} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
                           <div className="flex items-center gap-4">
                             <img 
                               src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} 
@@ -426,34 +774,71 @@ export default function App() {
                             <div>
                               <div className="font-bold text-slate-800">{u.displayName}</div>
                               <div className="text-xs text-slate-400">{u.email}</div>
+                              {record && (record.checkIn || record.checkOut) && (
+                                <div className="flex items-center gap-2 mt-1 text-[10px] font-bold text-indigo-500 uppercase">
+                                  <Clock className="w-3 h-3" />
+                                  {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--'} 
+                                  <ArrowRightLeft className="w-2 h-2" />
+                                  {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--'}
+                                </div>
+                              )}
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <button 
-                              onClick={() => handleMarkAttendance(u.uid, 'present')}
-                              className={cn(
-                                "flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all",
-                                record?.status === 'present' 
-                                  ? "bg-green-600 text-white shadow-md shadow-green-100" 
-                                  : "bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-600"
-                              )}
-                            >
-                              <CheckCircle2 className="w-4 h-4" />
-                              <span className="hidden sm:inline">Present</span>
-                            </button>
-                            <button 
-                              onClick={() => handleMarkAttendance(u.uid, 'absent')}
-                              className={cn(
-                                "flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all",
-                                record?.status === 'absent' 
-                                  ? "bg-red-600 text-white shadow-md shadow-red-100" 
-                                  : "bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600"
-                              )}
-                            >
-                              <XCircle className="w-4 h-4" />
-                              <span className="hidden sm:inline">Absent</span>
-                            </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-1 mr-2">
+                              <button 
+                                onClick={() => handleMarkAttendance(u.uid, 'present')}
+                                className={cn(
+                                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                  record?.status === 'present' 
+                                    ? "bg-green-600 text-white" 
+                                    : "bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-600"
+                                )}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Present
+                              </button>
+                              <button 
+                                onClick={() => handleMarkAttendance(u.uid, 'absent')}
+                                className={cn(
+                                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                  record?.status === 'absent' 
+                                    ? "bg-red-600 text-white" 
+                                    : "bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600"
+                                )}
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                Absent
+                              </button>
+                            </div>
+
+                            <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+                              <button 
+                                onClick={() => handleSetTime(u.uid, 'checkIn')}
+                                className={cn(
+                                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                  record?.checkIn 
+                                    ? "bg-indigo-100 text-indigo-700" 
+                                    : "bg-slate-50 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                                )}
+                              >
+                                <Clock className="w-3 h-3" />
+                                {record?.checkIn ? "In: " + format(record.checkIn.toDate(), 'HH:mm') : "Set In"}
+                              </button>
+                              <button 
+                                onClick={() => handleSetTime(u.uid, 'checkOut')}
+                                className={cn(
+                                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                  record?.checkOut 
+                                    ? "bg-slate-100 text-slate-700" 
+                                    : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
+                                )}
+                              >
+                                <Clock className="w-3 h-3" />
+                                {record?.checkOut ? "Out: " + format(record.checkOut.toDate(), 'HH:mm') : "Set Out"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -486,7 +871,11 @@ export default function App() {
                               </div>
                               <div>
                                 <div className="font-bold">{format(parseISO(record.date), 'MMMM do, yyyy')}</div>
-                                <div className="text-xs text-slate-400">Marked at {format(record.timestamp.toDate(), 'HH:mm')}</div>
+                                <div className="flex items-center gap-3 text-xs text-slate-400">
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : 'N/A'}</span>
+                                  <ArrowRightLeft className="w-2 h-2" />
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : 'N/A'}</span>
+                                </div>
                               </div>
                             </div>
                             <div className={cn(
@@ -511,6 +900,14 @@ export default function App() {
 
           </div>
         </main>
+
+        <BiometricModal 
+          isOpen={isBioModalOpen} 
+          onClose={() => setIsBioModalOpen(false)} 
+          onVerify={handleSelfCheck}
+          type={bioType}
+          profile={profile}
+        />
       </div>
     </ErrorBoundary>
   );

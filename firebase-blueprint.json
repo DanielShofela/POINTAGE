@@ -2,25 +2,39 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile and role information.",
+      "description": "User profile and role information, including biometric credentials.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "description": "Unique user ID from Firebase Auth." },
         "email": { "type": "string", "format": "email", "description": "User's email address." },
         "displayName": { "type": "string", "description": "User's display name." },
-        "role": { "type": "string", "enum": ["admin", "user"], "description": "The user's role in the system." }
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "The user's role in the system." },
+        "credentials": { 
+          "type": "array", 
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "publicKey": { "type": "string" },
+              "counter": { "type": "number" }
+            }
+          },
+          "description": "Registered biometric credentials." 
+        }
       },
       "required": ["uid", "email", "role"]
     },
     "Attendance": {
       "title": "Attendance",
-      "description": "Attendance record for a user on a specific date.",
+      "description": "Attendance record for a user on a specific date, including arrival and departure times.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "The UID of the user whose attendance is being marked." },
         "date": { "type": "string", "format": "date", "description": "The date for which attendance is marked (YYYY-MM-DD)." },
         "status": { "type": "string", "enum": ["present", "absent"], "description": "The attendance status." },
-        "markedBy": { "type": "string", "description": "The UID of the admin who marked the attendance." },
+        "markedBy": { "type": "string", "description": "The UID of the admin who marked the attendance, or 'self' if checked in by user." },
+        "checkIn": { "type": "string", "format": "date-time", "description": "The time the user checked in." },
+        "checkOut": { "type": "string", "format": "date-time", "description": "The time the user checked out." },
         "timestamp": { "type": "string", "format": "date-time", "description": "The exact time the record was created." }
       },
       "required": ["userId", "date", "status", "markedBy", "timestamp"]

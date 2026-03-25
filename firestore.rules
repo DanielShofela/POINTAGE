@@ -55,7 +55,7 @@ service cloud.firestore {
              data.userId is string &&
              data.date is string &&
              data.status in ['present', 'absent'] &&
-             data.markedBy == request.auth.uid &&
+             (data.markedBy == request.auth.uid || data.markedBy == 'self') &&
              data.timestamp is timestamp;
     }
 
@@ -78,8 +78,18 @@ service cloud.firestore {
 
     match /attendance/{attendanceId} {
       allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
-      allow create: if isAdmin() && isValidAttendance(request.resource.data);
-      allow update: if isAdmin() && isValidAttendance(request.resource.data);
+      
+      // Admins can create/update any attendance
+      // Users can create their own check-in/out record
+      allow create: if (isAdmin() && isValidAttendance(request.resource.data)) ||
+                    (isAuthenticated() && request.resource.data.userId == request.auth.uid && 
+                     request.resource.data.markedBy == 'self' && isValidAttendance(request.resource.data));
+      
+      allow update: if (isAdmin() && isValidAttendance(request.resource.data)) ||
+                    (isAuthenticated() && resource.data.userId == request.auth.uid && 
+                     request.resource.data.userId == request.auth.uid &&
+                     isValidAttendance(request.resource.data));
+      
       allow delete: if isAdmin();
     }
   }
