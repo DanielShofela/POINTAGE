@@ -46,7 +46,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO, subDays, isBefore, startOfDay } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -271,43 +271,44 @@ const UserConsultationModal = ({
 
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
               <div>
-                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Historique de présence</h4>
+                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Historique des 7 derniers jours</h4>
                 <div className="space-y-3">
-                  {userRecords.length > 0 ? (
-                    userRecords.map(record => (
-                      <div key={record.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                  {eachDayOfInterval({
+                    start: subDays(new Date(), 6),
+                    end: new Date()
+                  }).reverse().map(day => {
+                    const dateStr = format(day, 'yyyy-MM-dd');
+                    const record = attendanceRecords.find(r => r.userId === userProfile.uid && r.date === dateStr);
+                    
+                    return (
+                      <div key={dateStr} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className={cn(
                             "w-10 h-10 rounded-xl flex items-center justify-center",
-                            record.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                            record?.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
                           )}>
-                            {record.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                            {record?.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
                           </div>
                           <div>
                             <div className="font-bold text-slate-700 capitalize">
-                              {format(parseISO(record.date), 'EEEE d MMMM yyyy', { locale: fr })}
+                              {format(day, 'EEEE d MMMM yyyy', { locale: fr })}
                             </div>
                             <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
                               <ArrowRightLeft className="w-2 h-2" />
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
                             </div>
                           </div>
                         </div>
                         <div className={cn(
                           "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                          record.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                          record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
                         )}>
-                          {record.status === 'present' ? 'Présent' : 'Absent'}
+                          {record?.status === 'present' ? 'Présent' : 'Absent'}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
-                      <CalendarIcon className="w-12 h-12 mx-auto mb-4 text-slate-200" />
-                      <p className="text-slate-400 font-medium">Aucun enregistrement trouvé</p>
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -460,6 +461,36 @@ export default function App() {
           status: 'absent', // Only one time set, so absent
           markedBy: profile.uid,
           [type]: serverTimestamp(),
+          timestamp: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+    }
+  };
+
+  const handleSetAbsent = async (userId: string) => {
+    if (!profile || profile.role !== 'admin' || !userId || userId === 'undefined') {
+      console.error('handleSetAbsent: Missing userId or unauthorized');
+      return;
+    }
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const existingRecord = attendance.find(r => r.userId === userId && r.date === dateStr);
+
+    try {
+      if (existingRecord) {
+        await updateDoc(doc(db, 'attendance', existingRecord.id), {
+          status: 'absent',
+          checkIn: null,
+          checkOut: null,
+          timestamp: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'attendance'), {
+          userId,
+          date: dateStr,
+          status: 'absent',
+          markedBy: profile.uid,
           timestamp: serverTimestamp()
         });
       }
@@ -630,10 +661,10 @@ export default function App() {
                             )}
                           >
                             {format(day, 'd')}
-                            {record && !isSelected && (
+                            {!isSelected && (isBefore(day, startOfDay(new Date())) || isToday(day)) && (
                               <div className={cn(
                                 "absolute bottom-1 w-1 h-1 rounded-full",
-                                record.status === 'present' ? "bg-green-500" : "bg-red-500"
+                                record?.status === 'present' ? "bg-green-500" : "bg-red-500"
                               )} />
                             )}
                           </button>
@@ -760,6 +791,18 @@ export default function App() {
                                 <Clock className="w-3 h-3" />
                                 {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
                               </button>
+                              <button 
+                                onClick={() => handleSetAbsent(u.uid)}
+                                className={cn(
+                                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                  record?.status === 'absent' && !record?.checkIn && !record?.checkOut
+                                    ? "bg-red-100 text-red-700" 
+                                    : "bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                )}
+                              >
+                                <XCircle className="w-3 h-3" />
+                                {record?.status === 'absent' && !record?.checkIn && !record?.checkOut ? "Marqué Absent" : "Absent"}
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -791,42 +834,40 @@ export default function App() {
                   <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
                     <h2 className="text-2xl font-bold mb-6">Votre historique de présence</h2>
                     <div className="space-y-4">
-                      {attendance
-                        .filter(r => r.userId === user.uid)
-                        .sort((a, b) => b.date.localeCompare(a.date))
-                        .slice(0, 10)
-                        .map(record => (
-                          <div key={record.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      {eachDayOfInterval({
+                        start: subDays(new Date(), 6),
+                        end: new Date()
+                      }).reverse().map(day => {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const record = attendance.find(r => r.userId === user.uid && r.date === dateStr);
+                        
+                        return (
+                          <div key={dateStr} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                             <div className="flex items-center gap-4">
                               <div className={cn(
                                 "w-10 h-10 rounded-xl flex items-center justify-center",
-                                record.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                                record?.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
                               )}>
-                                {record.status === 'present' ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
+                                {record?.status === 'present' ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
                               </div>
                               <div>
-                                <div className="font-bold capitalize">{format(parseISO(record.date), 'EEEE d MMMM yyyy', { locale: fr })}</div>
+                                <div className="font-bold capitalize">{format(day, 'EEEE d MMMM yyyy', { locale: fr })}</div>
                                 <div className="flex items-center gap-3 text-xs text-slate-400">
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : 'N/A'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : 'N/A'}</span>
                                   <ArrowRightLeft className="w-2 h-2" />
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : 'N/A'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : 'N/A'}</span>
                                 </div>
                               </div>
                             </div>
                             <div className={cn(
                               "px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest",
-                              record.status === 'present' ? "bg-green-600 text-white" : "bg-red-600 text-white"
+                              record?.status === 'present' ? "bg-green-600 text-white" : "bg-red-600 text-white"
                             )}>
-                              {record.status === 'present' ? 'Présent' : 'Absent'}
+                              {record?.status === 'present' ? 'Présent' : 'Absent'}
                             </div>
                           </div>
-                        ))}
-                      {attendance.filter(r => r.userId === user.uid).length === 0 && (
-                        <div className="text-center py-12 text-slate-400">
-                          <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                          <p>Aucun relevé de présence trouvé pour le moment.</p>
-                        </div>
-                      )}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
