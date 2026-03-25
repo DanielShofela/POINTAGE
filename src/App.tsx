@@ -40,14 +40,13 @@ import {
   Loader2,
   ShieldCheck,
   User as UserIcon,
-  Fingerprint,
   Clock,
   ArrowRightLeft,
   Eye,
   EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -63,13 +62,7 @@ interface UserProfile {
   email: string;
   displayName: string;
   role: 'admin' | 'user';
-  pin?: string;
 }
-
-// --- PIN Helpers ---
-const verifyPin = (inputPin: string, userPin?: string) => {
-  return inputPin === userPin;
-};
 
 interface AttendanceRecord {
   id: string;
@@ -129,126 +122,6 @@ const LoadingScreen = () => (
     </motion.div>
   </div>
 );
-
-const PinModal = ({ isOpen, onClose, onVerify, type, targetProfile }: { 
-  isOpen: boolean, 
-  onClose: () => void, 
-  onVerify: (uid?: string) => void, 
-  type: 'check-in' | 'check-out',
-  targetProfile: UserProfile | null
-}) => {
-  const [pin, setPin] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-
-  const handleNumberClick = (num: string) => {
-    if (pin.length < 4) {
-      setPin(prev => prev + num);
-      setError(null);
-    }
-  };
-
-  const handleDelete = () => {
-    setPin(prev => prev.slice(0, -1));
-    setError(null);
-  };
-
-  const handleSubmit = async () => {
-    if (pin.length !== 4) {
-      setError("Le PIN doit comporter 4 chiffres.");
-      return;
-    }
-
-    if (verifyPin(pin, targetProfile?.pin)) {
-      setSuccess(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      onVerify(targetProfile?.uid);
-      onClose();
-      setPin('');
-      setSuccess(false);
-    } else {
-      setError("Code PIN incorrect.");
-      setPin('');
-    }
-  };
-
-  useEffect(() => {
-    if (pin.length === 4) {
-      handleSubmit();
-    }
-  }, [pin]);
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 text-center shadow-2xl"
-          >
-            <div className="mb-6">
-              <h3 className="text-2xl font-bold text-slate-900 mb-2 capitalize">
-                {type === 'check-in' ? 'Arrivée' : 'Départ'}
-              </h3>
-              <p className="text-slate-500">Entrez votre code PIN pour valider.</p>
-            </div>
-
-            <div className="flex justify-center gap-3 mb-8">
-              {[0, 1, 2, 3].map((i) => (
-                <div 
-                  key={i}
-                  className={cn(
-                    "w-4 h-4 rounded-full border-2 transition-all duration-200",
-                    pin.length > i 
-                      ? "bg-indigo-600 border-indigo-600 scale-110" 
-                      : "border-slate-200"
-                  )}
-                />
-              ))}
-            </div>
-
-            {error && <p className="text-red-500 text-sm font-medium mb-6">{error}</p>}
-            {success && <p className="text-green-600 text-sm font-bold mb-6">Code PIN correct !</p>}
-
-            <div className="grid grid-cols-3 gap-4 mb-8">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
-                <button
-                  key={num}
-                  onClick={() => handleNumberClick(num)}
-                  className="w-16 h-16 mx-auto rounded-2xl bg-slate-50 text-xl font-bold text-slate-700 hover:bg-slate-100 active:scale-90 transition-all"
-                >
-                  {num}
-                </button>
-              ))}
-              <div />
-              <button
-                onClick={() => handleNumberClick('0')}
-                className="w-16 h-16 mx-auto rounded-2xl bg-slate-50 text-xl font-bold text-slate-700 hover:bg-slate-100 active:scale-90 transition-all"
-              >
-                0
-              </button>
-              <button
-                onClick={handleDelete}
-                className="w-16 h-16 mx-auto rounded-2xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-100 active:scale-90 transition-all"
-              >
-                <XCircle className="w-6 h-6" />
-              </button>
-            </div>
-
-            <button 
-              onClick={onClose}
-              className="w-full text-slate-400 font-semibold py-2 hover:text-slate-600"
-            >
-              Annuler
-            </button>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-};
 
 const AdminStatsGrid = ({ title, records, periodLabel }: { title: string, records: AttendanceRecord[], periodLabel: string }) => {
   const presentCount = records.filter(r => r.status === 'present').length;
@@ -342,24 +215,18 @@ const UserConsultationModal = ({
   isOpen, 
   onClose, 
   userProfile, 
-  attendanceRecords,
-  onSetPin,
-  onPinCheck
+  attendanceRecords
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   userProfile: UserProfile | null, 
-  attendanceRecords: AttendanceRecord[],
-  onSetPin: (u: UserProfile) => void,
-  onPinCheck: (type: 'check-in' | 'check-out') => void
+  attendanceRecords: AttendanceRecord[]
 }) => {
   if (!userProfile) return null;
 
   const userRecords = attendanceRecords
     .filter(r => r.userId === userProfile.uid)
     .sort((a, b) => b.date.localeCompare(a.date));
-
-  const todayRecord = attendanceRecords.find(r => r.userId === userProfile.uid && r.date === format(new Date(), 'yyyy-MM-dd'));
 
   return (
     <AnimatePresence>
@@ -392,62 +259,6 @@ const UserConsultationModal = ({
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
-              {/* PIN Actions Section */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <Clock className="w-4 h-4" />
-                  Pointage par PIN
-                </h4>
-                <div className="grid grid-cols-1 gap-4">
-                  {!userProfile.pin ? (
-                    <button 
-                      onClick={() => onSetPin(userProfile)}
-                      className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all border bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100"
-                    >
-                      <ShieldCheck className="w-5 h-5" />
-                      Définir un Code PIN
-                    </button>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex gap-4">
-                        <button 
-                          onClick={() => onPinCheck('check-in')}
-                          disabled={!!todayRecord?.checkIn}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
-                            todayRecord?.checkIn 
-                              ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                              : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 active:scale-95"
-                          )}
-                        >
-                          <LogIn className="w-5 h-5" />
-                          Arrivée
-                        </button>
-                        <button 
-                          onClick={() => onPinCheck('check-out')}
-                          disabled={!!todayRecord?.checkOut}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
-                            todayRecord?.checkOut 
-                              ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                              : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900 active:scale-95"
-                          )}
-                        >
-                          <LogOut className="w-5 h-5" />
-                          Départ
-                        </button>
-                      </div>
-                      <button 
-                        onClick={() => onSetPin(userProfile)}
-                        className="w-full text-xs text-indigo-600 font-bold hover:underline"
-                      >
-                        Réinitialiser le Code PIN
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div>
                 <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Historique de présence</h4>
                 <div className="space-y-3">
@@ -548,8 +359,6 @@ export default function App() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
-  const [pinType, setPinType] = useState<'check-in' | 'check-out'>('check-in');
   const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -615,37 +424,6 @@ export default function App() {
     }
   }, [user, profile]);
 
-  const handleMarkAttendance = async (userId: string, status: 'present' | 'absent') => {
-    if (!profile || profile.role !== 'admin' || !userId || userId === 'undefined') {
-      console.error('handleMarkAttendance: Missing userId or unauthorized');
-      return;
-    }
-
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    const existingRecord = attendance.find(r => r.userId === userId && r.date === dateStr);
-
-    try {
-      if (existingRecord) {
-        await setDoc(doc(db, 'attendance', existingRecord.id), {
-          ...existingRecord,
-          status,
-          markedBy: profile.uid,
-          timestamp: serverTimestamp()
-        });
-      } else {
-        await addDoc(collection(db, 'attendance'), {
-          userId,
-          date: dateStr,
-          status,
-          markedBy: profile.uid,
-          timestamp: serverTimestamp()
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attendance');
-    }
-  };
-
   const handleSetTime = async (userId: string, type: 'checkIn' | 'checkOut') => {
     if (!profile || profile.role !== 'admin' || !userId || userId === 'undefined') {
       console.error('handleSetTime: Missing userId or unauthorized');
@@ -656,16 +434,19 @@ export default function App() {
 
     try {
       if (existingRecord) {
+        const hasCheckIn = type === 'checkIn' || !!existingRecord.checkIn;
+        const hasCheckOut = type === 'checkOut' || !!existingRecord.checkOut;
+        
         await updateDoc(doc(db, 'attendance', existingRecord.id), {
           [type]: serverTimestamp(),
-          status: 'present',
+          status: (hasCheckIn && hasCheckOut) ? 'present' : 'absent',
           timestamp: serverTimestamp()
         });
       } else {
         await addDoc(collection(db, 'attendance'), {
           userId,
           date: dateStr,
-          status: 'present',
+          status: 'absent', // Only one time set, so absent
           markedBy: profile.uid,
           [type]: serverTimestamp(),
           timestamp: serverTimestamp()
@@ -673,86 +454,6 @@ export default function App() {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'attendance');
-    }
-  };
-
-  const handleSelfCheck = async (targetUserId?: string) => {
-    const uid = targetUserId || user?.uid;
-    if (!uid) {
-      console.error('handleSelfCheck: No user ID provided');
-      return;
-    }
-    const dateStr = format(new Date(), 'yyyy-MM-dd');
-    const existingRecord = attendance.find(r => r.userId === uid && r.date === dateStr);
-
-    try {
-      if (pinType === 'check-in') {
-        if (existingRecord) {
-          if (existingRecord.checkIn) return; // Already checked in
-          await updateDoc(doc(db, 'attendance', existingRecord.id), {
-            checkIn: serverTimestamp(),
-            status: 'present',
-            timestamp: serverTimestamp()
-          });
-        } else {
-          await addDoc(collection(db, 'attendance'), {
-            userId: uid,
-            date: dateStr,
-            status: 'present',
-            markedBy: profile?.role === 'admin' ? profile.uid : 'self',
-            checkIn: serverTimestamp(),
-            timestamp: serverTimestamp()
-          });
-        }
-      } else {
-        if (!existingRecord) {
-          // Allow check-out even if no check-in record exists
-          await addDoc(collection(db, 'attendance'), {
-            userId: uid,
-            date: dateStr,
-            status: 'present',
-            markedBy: profile?.role === 'admin' ? profile.uid : 'self',
-            checkOut: serverTimestamp(),
-            timestamp: serverTimestamp()
-          });
-        } else {
-          if (existingRecord.checkOut) return; // Already checked out
-          await updateDoc(doc(db, 'attendance', existingRecord.id), {
-            checkOut: serverTimestamp(),
-            status: 'present',
-            timestamp: serverTimestamp()
-          });
-        }
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attendance');
-    }
-  };
-
-  const handleSetPin = async (targetUser: UserProfile) => {
-    if (!profile || profile.role !== 'admin') return;
-
-    const newPin = window.prompt("Entrez un nouveau code PIN à 4 chiffres pour " + targetUser.displayName);
-    if (!newPin) return;
-
-    if (!/^\d{4}$/.test(newPin)) {
-      alert("Le code PIN doit comporter exactement 4 chiffres.");
-      return;
-    }
-
-    try {
-      await updateDoc(doc(db, 'users', targetUser.uid), {
-        pin: newPin
-      });
-      
-      // Update local state
-      setAllUsers(prev => prev.map(u => u.uid === targetUser.uid ? { ...u, pin: newPin } : u));
-      if (selectedUserForConsult?.uid === targetUser.uid) {
-        setSelectedUserForConsult({ ...selectedUserForConsult, pin: newPin });
-      }
-      alert("Code PIN mis à jour avec succès !");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${targetUser.uid}`);
     }
   };
 
@@ -812,7 +513,7 @@ export default function App() {
               {profile?.role === 'user' && (
                 <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-indigo-100/50 border border-indigo-50 overflow-hidden relative">
                   <div className="absolute top-0 right-0 p-4 opacity-5">
-                    <Fingerprint className="w-24 h-24" />
+                    <Clock className="w-24 h-24" />
                   </div>
                   <h2 className="font-bold text-lg flex items-center gap-2 mb-6">
                     <Clock className="w-5 h-5 text-indigo-600" />
@@ -936,16 +637,6 @@ export default function App() {
               {profile?.role !== 'admin' && (
                 <div className="space-y-6">
                   <StatsCard 
-                    title="Stats Hebdomadaires"
-                    periodLabel="Cette semaine"
-                    records={attendance.filter(r => {
-                      const recordDate = parseISO(r.date);
-                      const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-                      const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-                      return r.userId === user.uid && isWithinInterval(recordDate, { start: weekStart, end: weekEnd });
-                    })}
-                  />
-                  <StatsCard 
                     title="Stats Mensuelles"
                     periodLabel={format(currentMonth, 'MMMM yyyy', { locale: fr })}
                     records={attendance.filter(r => 
@@ -1024,34 +715,7 @@ export default function App() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2">
-                            <div className="flex items-center gap-1 mr-2">
-                              <button 
-                                onClick={() => handleMarkAttendance(u.uid, 'present')}
-                                className={cn(
-                                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                  record?.status === 'present' 
-                                    ? "bg-green-600 text-white" 
-                                    : "bg-slate-100 text-slate-600 hover:bg-green-50 hover:text-green-600"
-                                )}
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Présent
-                              </button>
-                              <button 
-                                onClick={() => handleMarkAttendance(u.uid, 'absent')}
-                                className={cn(
-                                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                  record?.status === 'absent' 
-                                    ? "bg-red-600 text-white" 
-                                    : "bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600"
-                                )}
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                                Absent
-                              </button>
-                            </div>
-
-                            <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+                            <div className="flex items-center gap-1">
                               <button 
                                 onClick={() => handleSetTime(u.uid, 'checkIn')}
                                 className={cn(
@@ -1091,16 +755,6 @@ export default function App() {
 
                   {/* Admin Stats Section (Moved to bottom) */}
                   <div className="p-6 bg-slate-50 border-t border-slate-100 space-y-8">
-                    <AdminStatsGrid 
-                      title="Statistiques Hebdomadaires"
-                      periodLabel="Cette semaine"
-                      records={attendance.filter(r => {
-                        const recordDate = parseISO(r.date);
-                        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-                        const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-                        return isWithinInterval(recordDate, { start: weekStart, end: weekEnd });
-                      })}
-                    />
                     <AdminStatsGrid 
                       title="Statistiques Mensuelles"
                       periodLabel={format(currentMonth, 'MMMM yyyy', { locale: fr })}
@@ -1160,24 +814,11 @@ export default function App() {
           </div>
         </main>
 
-        <PinModal 
-          isOpen={isPinModalOpen} 
-          onClose={() => setIsPinModalOpen(false)} 
-          onVerify={handleSelfCheck}
-          type={pinType}
-          targetProfile={selectedUserForConsult}
-        />
-
         <UserConsultationModal
           isOpen={isConsultModalOpen}
           onClose={() => setIsConsultModalOpen(false)}
           userProfile={selectedUserForConsult}
           attendanceRecords={attendance}
-          onSetPin={handleSetPin}
-          onPinCheck={(type) => {
-            setPinType(type);
-            setIsPinModalOpen(true);
-          }}
         />
       </div>
     </ErrorBoundary>
