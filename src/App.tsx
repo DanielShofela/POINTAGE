@@ -63,26 +63,12 @@ interface UserProfile {
   email: string;
   displayName: string;
   role: 'admin' | 'user';
-  credentials?: {
-    id: string;
-    publicKey: string;
-    counter: number;
-  }[];
+  pin?: string;
 }
 
-// --- WebAuthn Helpers ---
-
-const bufferToBase64 = (buffer: ArrayBuffer) => {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
-};
-
-const base64ToBuffer = (base64: string) => {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes.buffer;
+// --- PIN Helpers ---
+const verifyPin = (inputPin: string, userPin?: string) => {
+  return inputPin === userPin;
 };
 
 interface AttendanceRecord {
@@ -144,68 +130,53 @@ const LoadingScreen = () => (
   </div>
 );
 
-const BiometricModal = ({ isOpen, onClose, onVerify, type, targetProfile }: { 
+const PinModal = ({ isOpen, onClose, onVerify, type, targetProfile }: { 
   isOpen: boolean, 
   onClose: () => void, 
   onVerify: (uid?: string) => void, 
   type: 'check-in' | 'check-out',
   targetProfile: UserProfile | null
 }) => {
-  const [verifying, setVerifying] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const startVerification = async () => {
-    if (!targetProfile?.credentials?.length) {
-      setError("Aucune empreinte enregistrée pour cet utilisateur.");
+  const handleNumberClick = (num: string) => {
+    if (pin.length < 4) {
+      setPin(prev => prev + num);
+      setError(null);
+    }
+  };
+
+  const handleDelete = () => {
+    setPin(prev => prev.slice(0, -1));
+    setError(null);
+  };
+
+  const handleSubmit = async () => {
+    if (pin.length !== 4) {
+      setError("Le PIN doit comporter 4 chiffres.");
       return;
     }
 
-    setVerifying(true);
-    setError(null);
-
-    try {
-      const challenge = new Uint8Array(32);
-      window.crypto.getRandomValues(challenge);
-
-      const allowCredentials = targetProfile.credentials.map(cred => ({
-        id: base64ToBuffer(cred.id),
-        type: 'public-key' as const,
-        transports: ['internal'] as AuthenticatorTransport[],
-      }));
-
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge,
-          allowCredentials,
-          userVerification: 'required',
-          timeout: 60000,
-        }
-      }) as PublicKeyCredential;
-
-      if (credential) {
-        // Explicitly verify that the returned credential ID matches one of the expected IDs
-        const returnedId = bufferToBase64(credential.rawId);
-        const isMatch = targetProfile.credentials.some(cred => cred.id === returnedId);
-
-        if (!isMatch) {
-          setError("Cette empreinte ne correspond pas à l'utilisateur sélectionné.");
-          return;
-        }
-
-        setSuccess(true);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        onVerify(targetProfile.uid);
-        onClose();
-      }
-    } catch (err) {
-      console.error('Biometric verification failed:', err);
-      setError("La vérification a échoué. Veuillez réessayer.");
-    } finally {
-      setVerifying(false);
+    if (verifyPin(pin, targetProfile?.pin)) {
+      setSuccess(true);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      onVerify(targetProfile?.uid);
+      onClose();
+      setPin('');
       setSuccess(false);
+    } else {
+      setError("Code PIN incorrect.");
+      setPin('');
     }
   };
+
+  useEffect(() => {
+    if (pin.length === 4) {
+      handleSubmit();
+    }
+  }, [pin]);
 
   return (
     <AnimatePresence>
@@ -221,58 +192,57 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, targetProfile }: {
               <h3 className="text-2xl font-bold text-slate-900 mb-2 capitalize">
                 {type === 'check-in' ? 'Arrivée' : 'Départ'}
               </h3>
-              <p className="text-slate-500">Vérifiez votre identité avec votre empreinte enregistrée.</p>
+              <p className="text-slate-500">Entrez votre code PIN pour valider.</p>
             </div>
 
-            <div className="relative w-32 h-32 mx-auto mb-8">
-              <motion.div 
-                animate={verifying ? { scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] } : {}}
-                transition={{ repeat: Infinity, duration: 1.5 }}
-                className={cn(
-                  "absolute inset-0 rounded-full border-4 flex items-center justify-center transition-colors duration-500",
-                  success ? "border-green-500 bg-green-50" : verifying ? "border-indigo-400 bg-indigo-50" : error ? "border-red-100 bg-red-50" : "border-slate-100"
-                )}
+            <div className="flex justify-center gap-3 mb-8">
+              {[0, 1, 2, 3].map((i) => (
+                <div 
+                  key={i}
+                  className={cn(
+                    "w-4 h-4 rounded-full border-2 transition-all duration-200",
+                    pin.length > i 
+                      ? "bg-indigo-600 border-indigo-600 scale-110" 
+                      : "border-slate-200"
+                  )}
+                />
+              ))}
+            </div>
+
+            {error && <p className="text-red-500 text-sm font-medium mb-6">{error}</p>}
+            {success && <p className="text-green-600 text-sm font-bold mb-6">Code PIN correct !</p>}
+
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+                <button
+                  key={num}
+                  onClick={() => handleNumberClick(num)}
+                  className="w-16 h-16 mx-auto rounded-2xl bg-slate-50 text-xl font-bold text-slate-700 hover:bg-slate-100 active:scale-90 transition-all"
+                >
+                  {num}
+                </button>
+              ))}
+              <div />
+              <button
+                onClick={() => handleNumberClick('0')}
+                className="w-16 h-16 mx-auto rounded-2xl bg-slate-50 text-xl font-bold text-slate-700 hover:bg-slate-100 active:scale-90 transition-all"
               >
-                {success ? (
-                  <CheckCircle2 className="w-16 h-16 text-green-500" />
-                ) : error ? (
-                  <XCircle className="w-16 h-16 text-red-500" />
-                ) : (
-                  <Fingerprint className={cn("w-16 h-16 transition-colors duration-500", verifying ? "text-indigo-600" : "text-slate-300")} />
-                )}
-              </motion.div>
+                0
+              </button>
+              <button
+                onClick={handleDelete}
+                className="w-16 h-16 mx-auto rounded-2xl bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-100 active:scale-90 transition-all"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
             </div>
 
-            {error && (
-              <div className="mb-6">
-                <p className="text-red-500 text-sm font-medium mb-3">{error}</p>
-                {!targetProfile?.credentials?.length && (
-                  <p className="text-xs text-slate-400">
-                    L'administrateur doit d'abord enregistrer l'empreinte de l'utilisateur.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {!verifying && !success && (
-              <div className="space-y-3">
-                <button 
-                  onClick={startVerification}
-                  className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all active:scale-95"
-                >
-                  {error ? "Réessayer" : "Vérifier l'empreinte"}
-                </button>
-                <button 
-                  onClick={onClose}
-                  className="w-full text-slate-400 font-semibold py-2 hover:text-slate-600"
-                >
-                  Annuler
-                </button>
-              </div>
-            )}
-
-            {verifying && <p className="text-indigo-600 font-bold animate-pulse">En attente du capteur...</p>}
-            {success && <p className="text-green-600 font-bold">Identité vérifiée !</p>}
+            <button 
+              onClick={onClose}
+              className="w-full text-slate-400 font-semibold py-2 hover:text-slate-600"
+            >
+              Annuler
+            </button>
           </motion.div>
         </div>
       )}
@@ -373,15 +343,15 @@ const UserConsultationModal = ({
   onClose, 
   userProfile, 
   attendanceRecords,
-  onRegisterBiometric,
-  onBiometricCheck
+  onSetPin,
+  onPinCheck
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   userProfile: UserProfile | null, 
   attendanceRecords: AttendanceRecord[],
-  onRegisterBiometric: (u: UserProfile) => void,
-  onBiometricCheck: (type: 'check-in' | 'check-out') => void
+  onSetPin: (u: UserProfile) => void,
+  onPinCheck: (type: 'check-in' | 'check-out') => void
 }) => {
   if (!userProfile) return null;
 
@@ -422,48 +392,56 @@ const UserConsultationModal = ({
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
-              {/* Biometric Actions Section */}
+              {/* PIN Actions Section */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <Fingerprint className="w-4 h-4" />
-                  Actions Biométriques
+                  <Clock className="w-4 h-4" />
+                  Pointage par PIN
                 </h4>
                 <div className="grid grid-cols-1 gap-4">
-                  {!userProfile.credentials?.length ? (
+                  {!userProfile.pin ? (
                     <button 
-                      onClick={() => onRegisterBiometric(userProfile)}
+                      onClick={() => onSetPin(userProfile)}
                       className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all border bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100"
                     >
-                      <Fingerprint className="w-5 h-5" />
-                      Enregistrer l'empreinte
+                      <ShieldCheck className="w-5 h-5" />
+                      Définir un Code PIN
                     </button>
                   ) : (
-                    <div className="flex gap-4">
+                    <div className="space-y-4">
+                      <div className="flex gap-4">
+                        <button 
+                          onClick={() => onPinCheck('check-in')}
+                          disabled={!!todayRecord?.checkIn}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
+                            todayRecord?.checkIn 
+                              ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                              : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 active:scale-95"
+                          )}
+                        >
+                          <LogIn className="w-5 h-5" />
+                          Arrivée
+                        </button>
+                        <button 
+                          onClick={() => onPinCheck('check-out')}
+                          disabled={!!todayRecord?.checkOut}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
+                            todayRecord?.checkOut 
+                              ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                              : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900 active:scale-95"
+                          )}
+                        >
+                          <LogOut className="w-5 h-5" />
+                          Départ
+                        </button>
+                      </div>
                       <button 
-                        onClick={() => onBiometricCheck('check-in')}
-                        disabled={!!todayRecord?.checkIn}
-                        className={cn(
-                          "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
-                          todayRecord?.checkIn 
-                            ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                            : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 active:scale-95"
-                        )}
+                        onClick={() => onSetPin(userProfile)}
+                        className="w-full text-xs text-indigo-600 font-bold hover:underline"
                       >
-                        <LogIn className="w-5 h-5" />
-                        Arrivée
-                      </button>
-                      <button 
-                        onClick={() => onBiometricCheck('check-out')}
-                        disabled={!!todayRecord?.checkOut}
-                        className={cn(
-                          "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
-                          todayRecord?.checkOut 
-                            ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                            : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900 active:scale-95"
-                        )}
-                      >
-                        <LogOut className="w-5 h-5" />
-                        Départ
+                        Réinitialiser le Code PIN
                       </button>
                     </div>
                   )}
@@ -570,8 +548,8 @@ export default function App() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [isBioModalOpen, setIsBioModalOpen] = useState(false);
-  const [bioType, setBioType] = useState<'check-in' | 'check-out'>('check-in');
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [pinType, setPinType] = useState<'check-in' | 'check-out'>('check-in');
   const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -708,7 +686,7 @@ export default function App() {
     const existingRecord = attendance.find(r => r.userId === uid && r.date === dateStr);
 
     try {
-      if (bioType === 'check-in') {
+      if (pinType === 'check-in') {
         if (existingRecord) {
           if (existingRecord.checkIn) return; // Already checked in
           await updateDoc(doc(db, 'attendance', existingRecord.id), {
@@ -751,67 +729,30 @@ export default function App() {
     }
   };
 
-  const handleRegisterFingerprint = async (targetUser?: UserProfile) => {
-    const target = targetUser || profile;
-    if (!user || !profile || !target) return;
+  const handleSetPin = async (targetUser: UserProfile) => {
+    if (!profile || profile.role !== 'admin') return;
+
+    const newPin = window.prompt("Entrez un nouveau code PIN à 4 chiffres pour " + targetUser.displayName);
+    if (!newPin) return;
+
+    if (!/^\d{4}$/.test(newPin)) {
+      alert("Le code PIN doit comporter exactement 4 chiffres.");
+      return;
+    }
 
     try {
-      const challenge = new Uint8Array(32);
-      window.crypto.getRandomValues(challenge);
-
-      const userID = new TextEncoder().encode(target.uid);
-
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          challenge,
-          rp: {
-            name: "Suivi de Présence",
-            id: window.location.hostname,
-          },
-          user: {
-            id: userID,
-            name: target.email || target.uid,
-            displayName: target.displayName,
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: "public-key" }, // ES256
-            { alg: -257, type: "public-key" }, // RS256
-          ],
-          authenticatorSelection: {
-            // Removing 'platform' allows external USB/NFC security keys and readers
-            userVerification: "required",
-          },
-          timeout: 60000,
-        },
-      }) as PublicKeyCredential;
-
-      if (credential) {
-        const response = credential.response as AuthenticatorAttestationResponse;
-        const newCredential = {
-          id: bufferToBase64(credential.rawId),
-          publicKey: bufferToBase64(response.getPublicKey()),
-          counter: 0,
-        };
-
-        const updatedCredentials = [...(target.credentials || []), newCredential];
-        await updateDoc(doc(db, 'users', target.uid), {
-          credentials: updatedCredentials
-        });
-        
-        if (target.uid === profile.uid) {
-          setProfile({ ...profile, credentials: updatedCredentials });
-        } else {
-          // Update allUsers state if admin is registering for someone else
-          setAllUsers(prev => prev.map(u => u.uid === target.uid ? { ...u, credentials: updatedCredentials } : u));
-          if (selectedUserForConsult?.uid === target.uid) {
-            setSelectedUserForConsult({ ...selectedUserForConsult, credentials: updatedCredentials });
-          }
-        }
-        alert("Empreinte enregistrée avec succès !");
+      await updateDoc(doc(db, 'users', targetUser.uid), {
+        pin: newPin
+      });
+      
+      // Update local state
+      setAllUsers(prev => prev.map(u => u.uid === targetUser.uid ? { ...u, pin: newPin } : u));
+      if (selectedUserForConsult?.uid === targetUser.uid) {
+        setSelectedUserForConsult({ ...selectedUserForConsult, pin: newPin });
       }
+      alert("Code PIN mis à jour avec succès !");
     } catch (error) {
-      console.error('Fingerprint registration failed:', error);
-      alert("L'enregistrement a échoué. Assurez-vous que votre appareil prend en charge la biométrie et que vous avez accordé l'autorisation.");
+      handleFirestoreError(error, OperationType.WRITE, `users/${targetUser.uid}`);
     }
   };
 
@@ -1219,11 +1160,11 @@ export default function App() {
           </div>
         </main>
 
-        <BiometricModal 
-          isOpen={isBioModalOpen} 
-          onClose={() => setIsBioModalOpen(false)} 
+        <PinModal 
+          isOpen={isPinModalOpen} 
+          onClose={() => setIsPinModalOpen(false)} 
           onVerify={handleSelfCheck}
-          type={bioType}
+          type={pinType}
           targetProfile={selectedUserForConsult}
         />
 
@@ -1232,10 +1173,10 @@ export default function App() {
           onClose={() => setIsConsultModalOpen(false)}
           userProfile={selectedUserForConsult}
           attendanceRecords={attendance}
-          onRegisterBiometric={handleRegisterFingerprint}
-          onBiometricCheck={(type) => {
-            setBioType(type);
-            setIsBioModalOpen(true);
+          onSetPin={handleSetPin}
+          onPinCheck={(type) => {
+            setPinType(type);
+            setIsPinModalOpen(true);
           }}
         />
       </div>
