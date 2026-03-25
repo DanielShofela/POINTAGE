@@ -67,12 +67,12 @@ interface UserProfile {
   dailyRate?: number; // Pour les ouvriers
 }
 
-const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string, ring: string }> = {
-  admin: { primary: 'indigo-600', bg: 'indigo-50', text: 'indigo-700', ring: 'indigo-100' },
-  superviseur: { primary: 'purple-600', bg: 'purple-50', text: 'purple-700', ring: 'purple-100' },
-  personnel: { primary: 'blue-600', bg: 'blue-50', text: 'blue-700', ring: 'blue-100' },
-  stagiaire: { primary: 'emerald-600', bg: 'emerald-50', text: 'emerald-700', ring: 'emerald-100' },
-  ouvrier: { primary: 'orange-600', bg: 'orange-50', text: 'orange-700', ring: 'orange-100' }
+const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string, ring: string, border: string }> = {
+  admin: { primary: 'indigo-600', bg: 'indigo-50', text: 'indigo-700', ring: 'indigo-100', border: 'border-indigo-200' },
+  superviseur: { primary: 'purple-600', bg: 'purple-50', text: 'purple-700', ring: 'purple-100', border: 'border-purple-200' },
+  personnel: { primary: 'blue-600', bg: 'blue-50', text: 'blue-700', ring: 'blue-100', border: 'border-blue-200' },
+  stagiaire: { primary: 'emerald-600', bg: 'emerald-50', text: 'emerald-700', ring: 'emerald-100', border: 'border-emerald-200' },
+  ouvrier: { primary: 'orange-600', bg: 'orange-50', text: 'orange-700', ring: 'orange-100', border: 'border-orange-200' }
 };
 
 interface AttendanceRecord {
@@ -470,6 +470,12 @@ export default function App() {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const existingRecord = attendance.find(r => r.userId === userId && r.date === dateStr);
 
+    // Prevent overwriting existing time
+    if (existingRecord && existingRecord[type]) {
+      console.warn(`handleSetTime: ${type} already set for user ${userId} on ${dateStr}`);
+      return;
+    }
+
     try {
       if (existingRecord) {
         const hasCheckIn = type === 'checkIn' || !!existingRecord.checkIn;
@@ -535,7 +541,7 @@ export default function App() {
   const isAdminOrSuper = profile?.role === 'admin' || profile?.role === 'superviseur';
 
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
-    if (profile?.role !== 'admin') return;
+    if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
     } catch (error) {
@@ -544,7 +550,7 @@ export default function App() {
   };
 
   const handleUpdateDailyRate = async (userId: string, rate: number) => {
-    if (profile?.role !== 'admin') return;
+    if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
     try {
       await updateDoc(doc(db, 'users', userId), { dailyRate: rate });
     } catch (error) {
@@ -554,9 +560,9 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={cn("min-h-screen bg-slate-50 text-slate-900 font-sans", `selection:bg-${roleColor.primary}/20`)}>
+      <div className={cn("min-h-screen font-sans transition-colors duration-500", `bg-${roleColor.bg}`, `selection:bg-${roleColor.primary}/20`)}>
         {/* Header */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <header className={cn("bg-white border-b sticky top-0 z-10", `border-${roleColor.primary}/20`)}>
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center transition-colors", `bg-${roleColor.primary}`)}>
@@ -780,7 +786,11 @@ export default function App() {
                       const uColor = ROLE_COLORS[u.role] || ROLE_COLORS.personnel;
                       
                       return (
-                        <div key={u.uid || `user-${index}`} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
+                        <div key={u.uid || `user-${index}`} className={cn(
+                          "p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors",
+                          record?.status === 'present' ? "bg-green-50/30 hover:bg-green-50/50" : "bg-red-50/30 hover:bg-red-50/50",
+                          !record && "bg-white hover:bg-slate-50/50"
+                        )}>
                           <div className="flex items-center gap-4">
                             <button 
                               onClick={() => {
@@ -841,10 +851,11 @@ export default function App() {
                               <div className="flex items-center gap-1">
                                 <button 
                                   onClick={() => handleSetTime(u.uid, 'checkIn')}
+                                  disabled={!!record?.checkIn}
                                   className={cn(
                                     "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
                                     record?.checkIn 
-                                      ? `bg-${uColor.bg} text-${uColor.text}` 
+                                      ? `bg-${uColor.bg} text-${uColor.text} cursor-not-allowed opacity-80` 
                                       : "bg-slate-50 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
                                   )}
                                 >
@@ -853,10 +864,11 @@ export default function App() {
                                 </button>
                                 <button 
                                   onClick={() => handleSetTime(u.uid, 'checkOut')}
+                                  disabled={!!record?.checkOut}
                                   className={cn(
                                     "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
                                     record?.checkOut 
-                                      ? "bg-slate-100 text-slate-700" 
+                                      ? "bg-slate-100 text-slate-700 cursor-not-allowed opacity-80" 
                                       : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
                                   )}
                                 >
@@ -878,13 +890,14 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Admin only: Role & Rate management */}
-                            {profile.role === 'admin' && (
+                            {/* Admin & Superviseur: Role & Rate management */}
+                            {isAdminOrSuper && (
                               <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
                                 <select 
                                   value={u.role}
+                                  disabled={profile.role !== 'admin'} // Only admin can change roles
                                   onChange={(e) => handleUpdateRole(u.uid, e.target.value as UserRole)}
-                                  className="text-[9px] font-bold uppercase tracking-wider bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-indigo-500"
+                                  className="text-[9px] font-bold uppercase tracking-wider bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
                                 >
                                   <option value="personnel">Personnel</option>
                                   <option value="stagiaire">Stagiaire</option>

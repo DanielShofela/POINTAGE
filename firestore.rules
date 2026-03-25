@@ -37,17 +37,29 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isPrivileged() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur'])
+      );
+    }
+
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (
+        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
 
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'role']) &&
              data.uid is string &&
              data.email is string &&
-             data.role in ['admin', 'user'];
+             data.role in ['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] &&
+             (!('displayName' in data) || data.displayName is string) &&
+             (!('dailyRate' in data) || data.dailyRate is number);
     }
 
     function isValidAttendance(data) {
@@ -55,8 +67,10 @@ service cloud.firestore {
              data.userId is string &&
              data.date is string &&
              data.status in ['present', 'absent'] &&
-             (data.markedBy == request.auth.uid || data.markedBy == 'self') &&
-             data.timestamp is timestamp;
+             data.markedBy is string &&
+             data.timestamp is timestamp &&
+             (!('checkIn' in data) || data.checkIn is timestamp || data.checkIn == null) &&
+             (!('checkOut' in data) || data.checkOut is timestamp || data.checkOut == null);
     }
 
     // ===============================================================
@@ -64,30 +78,30 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow read: if isAuthenticated() && (isOwner(userId) || isPrivileged());
       
-      // Users can create their own profile, but only as 'user' role unless they are the default admin
+      // Users can create their own profile, but only as 'personnel' role by default unless they are the default admin
       allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
-                    (request.resource.data.role == 'user' || isAdmin());
+                    (request.resource.data.role == 'personnel' || isAdmin());
       
-      // Only admins can update roles. Users can update their own displayName.
+      // Only admins can update roles. Supervisors can update dailyRate. Users can update their own displayName.
       allow update: if isAuthenticated() && 
                     ((isAdmin() && isValidUser(request.resource.data)) || 
-                     (isOwner(userId) && request.resource.data.role == resource.data.role && isValidUser(request.resource.data)));
+                     (isPrivileged() && request.resource.data.role == resource.data.role && isValidUser(request.resource.data)) ||
+                     (isOwner(userId) && request.resource.data.role == resource.data.role && 
+                      request.resource.data.dailyRate == resource.data.dailyRate && isValidUser(request.resource.data)));
     }
 
     match /attendance/{attendanceId} {
-      allow read: if isAuthenticated() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated() && (isPrivileged() || resource.data.userId == request.auth.uid);
       
-      // Admins can create/update any attendance
-      // Users can create their own check-in/out record
-      allow create: if (isAdmin() && isValidAttendance(request.resource.data)) ||
+      // Privileged users (admin/super) can create/update any attendance
+      allow create: if (isPrivileged() && isValidAttendance(request.resource.data)) ||
                     (isAuthenticated() && request.resource.data.userId == request.auth.uid && 
-                     request.resource.data.markedBy == 'self' && isValidAttendance(request.resource.data));
+                     isValidAttendance(request.resource.data));
       
-      allow update: if (isAdmin() && isValidAttendance(request.resource.data)) ||
+      allow update: if (isPrivileged() && isValidAttendance(request.resource.data)) ||
                     (isAuthenticated() && resource.data.userId == request.auth.uid && 
-                     request.resource.data.userId == request.auth.uid &&
                      isValidAttendance(request.resource.data));
       
       allow delete: if isAdmin();
