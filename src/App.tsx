@@ -75,6 +75,12 @@ const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string,
   ouvrier: { primary: 'orange-600', bg: 'orange-50', text: 'orange-700', ring: 'orange-100', border: 'border-orange-200' }
 };
 
+const STATUS_COLORS = {
+  present: { primary: 'green-600', bg: 'green-50', text: 'green-700', ring: 'green-100', border: 'border-green-200' },
+  absent: { primary: 'red-600', bg: 'red-50', text: 'red-700', ring: 'red-100', border: 'border-red-200' },
+  none: { primary: 'slate-400', bg: 'slate-50', text: 'slate-600', ring: 'slate-100', border: 'border-slate-200' }
+};
+
 interface AttendanceRecord {
   id: string;
   userId: string;
@@ -532,13 +538,27 @@ export default function App() {
 
   const logout = () => signOut(auth);
 
-  if (loading) return <LoadingScreen />;
-  if (!user) return <LoginScreen />;
+  const todayRecord = useMemo(() => {
+    if (!user) return null;
+    return attendance.find(r => r.userId === user.uid && r.date === format(new Date(), 'yyyy-MM-dd'));
+  }, [user, attendance]);
 
-  const todayRecord = attendance.find(r => r.userId === user.uid && r.date === format(new Date(), 'yyyy-MM-dd'));
-  const roleColor = ROLE_COLORS[profile?.role || 'personnel'] || ROLE_COLORS.personnel;
+  const roleColor = useMemo(() => {
+    return ROLE_COLORS[profile?.role || 'personnel'] || ROLE_COLORS.personnel;
+  }, [profile?.role]);
 
   const isAdminOrSuper = profile?.role === 'admin' || profile?.role === 'superviseur';
+
+  const themeColor = useMemo(() => {
+    if (!user || !profile) return STATUS_COLORS.none;
+    if (isAdminOrSuper) return roleColor;
+    if (todayRecord?.status === 'present') return STATUS_COLORS.present;
+    if (todayRecord?.status === 'absent') return STATUS_COLORS.absent;
+    return roleColor;
+  }, [user, profile, isAdminOrSuper, todayRecord, roleColor]);
+
+  if (loading) return <LoadingScreen />;
+  if (!user) return <LoginScreen />;
 
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
@@ -560,22 +580,25 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={cn("min-h-screen font-sans transition-colors duration-500", `bg-${roleColor.bg}`, `selection:bg-${roleColor.primary}/20`)}>
+      <div className={cn("min-h-screen font-sans transition-colors duration-500", `bg-${themeColor.bg}`, `selection:bg-${themeColor.primary}/20`)}>
         {/* Header */}
-        <header className={cn("bg-white border-b sticky top-0 z-10", `border-${roleColor.primary}/20`)}>
+        <header className={cn("bg-white border-b sticky top-0 z-10 transition-all duration-500", `border-${themeColor.primary}/40`, `bg-${themeColor.bg}/60 backdrop-blur-xl`)}>
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center transition-colors", `bg-${roleColor.primary}`)}>
-                <CalendarIcon className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-3">
+              <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center transition-all shadow-lg shadow-current/20 transform hover:scale-105", `bg-${themeColor.primary}`)}>
+                <CalendarIcon className="w-6 h-6 text-white" />
               </div>
-              <span className="font-bold text-lg hidden sm:inline">Suivi de Présence</span>
+              <div className="flex flex-col">
+                <span className="font-black text-xl leading-tight tracking-tighter hidden sm:inline text-slate-800">Suivi de Présence</span>
+                <span className={cn("text-[10px] font-black uppercase tracking-[0.2em] hidden sm:inline opacity-70", `text-${themeColor.text}`)}>Système de Gestion</span>
+              </div>
             </div>
 
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 text-sm">
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="font-semibold text-slate-700">{profile?.displayName}</span>
-                  <span className={cn("text-xs capitalize flex items-center gap-1 font-bold", `text-${roleColor.primary}`)}>
+                  <span className={cn("text-xs capitalize flex items-center gap-1 font-bold", `text-${themeColor.primary}`)}>
                     {profile?.role === 'admin' && <ShieldCheck className="w-3 h-3" />}
                     {profile?.role === 'superviseur' && <ShieldCheck className="w-3 h-3 text-purple-500" />}
                     {profile?.role === 'personnel' && <UserIcon className="w-3 h-3" />}
@@ -587,7 +610,7 @@ export default function App() {
                 <img 
                   src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
                   alt="Avatar" 
-                  className={cn("w-10 h-10 rounded-full border-2", `border-${roleColor.ring}`)}
+                  className={cn("w-10 h-10 rounded-full border-2", `border-${themeColor.ring}`)}
                   referrerPolicy="no-referrer"
                 />
               </div>
@@ -603,18 +626,73 @@ export default function App() {
         </header>
 
         <main className="max-w-7xl mx-auto px-4 py-8">
+          {/* Legend Section */}
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={cn("mb-8 p-5 rounded-[2rem] border bg-white/70 backdrop-blur-md flex flex-col md:flex-row md:items-center gap-6 shadow-xl shadow-slate-200/50", `border-${themeColor.primary}/20`)}
+          >
+            <div className="flex flex-col gap-2 flex-1">
+              <div className="flex items-center gap-2">
+                <div className={cn("w-1.5 h-4 rounded-full", `bg-${themeColor.primary}`)} />
+                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Légende des Rôles (Couleurs de Base)</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                {Object.entries(ROLE_COLORS).map(([role, colors]) => (
+                  <div key={role} className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
+                    profile?.role === role ? `bg-${colors.bg} border-${colors.primary}/30 shadow-sm` : "bg-slate-50 border-slate-100 opacity-60"
+                  )}>
+                    <div className={cn("w-2.5 h-2.5 rounded-full shadow-sm", `bg-${colors.primary}`)} />
+                    <span className={cn("text-[11px] font-bold capitalize", profile?.role === role ? `text-${colors.text}` : "text-slate-500")}>{role}</span>
+                    {profile?.role === role && <div className={cn("w-1 h-1 rounded-full animate-pulse", `bg-${colors.primary}`)} />}
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="w-px h-12 bg-slate-200 hidden md:block mx-2" />
+            
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-4 rounded-full bg-slate-400" />
+                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Statut de Présence (Thème Dynamique)</span>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
+                  todayRecord?.status === 'present' ? "bg-green-50 border-green-500/30 shadow-sm" : "bg-slate-50 border-slate-100 opacity-60"
+                )}>
+                  <div className="w-3 h-3 rounded-lg bg-green-500 shadow-lg shadow-green-200 flex items-center justify-center">
+                    <CheckCircle2 className="w-2 h-2 text-white" />
+                  </div>
+                  <span className={cn("text-[11px] font-bold", todayRecord?.status === 'present' ? "text-green-700" : "text-slate-600")}>Présent (Thème Vert)</span>
+                </div>
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all",
+                  todayRecord?.status === 'absent' ? "bg-red-50 border-red-500/30 shadow-sm" : "bg-slate-50 border-slate-100 opacity-60"
+                )}>
+                  <div className="w-3 h-3 rounded-lg bg-red-500 shadow-lg shadow-red-200 flex items-center justify-center">
+                    <XCircle className="w-2 h-2 text-white" />
+                  </div>
+                  <span className={cn("text-[11px] font-bold", todayRecord?.status === 'absent' ? "text-red-700" : "text-slate-600")}>Absent (Thème Rouge)</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
             {/* Left Column: Calendar & Stats */}
             <div className="lg:col-span-4 space-y-8">
               {/* Check-In/Out Card (User Only) */}
               {profile?.role !== 'admin' && profile?.role !== 'superviseur' && (
-                <div className={cn("bg-white p-6 rounded-[2rem] shadow-xl border overflow-hidden relative", `shadow-${roleColor.primary}/10 border-${roleColor.ring}`)}>
+                <div className={cn("bg-white p-6 rounded-[2rem] shadow-xl border overflow-hidden relative transition-all duration-500", `shadow-${themeColor.primary}/10 border-${themeColor.ring}`)}>
                   <div className="absolute top-0 right-0 p-4 opacity-5">
                     <Clock className="w-24 h-24" />
                   </div>
                   <h2 className="font-bold text-lg flex items-center gap-2 mb-6">
-                    <Clock className={cn("w-5 h-5", `text-${roleColor.primary}`)} />
+                    <Clock className={cn("w-5 h-5", `text-${themeColor.primary}`)} />
                     Suivi Quotidien
                   </h2>
 
@@ -635,10 +713,10 @@ export default function App() {
                     </div>
 
                     {profile?.role === 'ouvrier' && profile.dailyRate && (
-                      <div className={cn("p-4 rounded-2xl border flex items-center justify-between", `bg-${roleColor.bg} border-${roleColor.ring}`)}>
+                      <div className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500", `bg-${themeColor.bg} border-${themeColor.ring}`)}>
                         <div>
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie cumulée</div>
-                          <div className={cn("text-xl font-black", `text-${roleColor.primary}`)}>
+                          <div className={cn("text-xl font-black", `text-${themeColor.primary}`)}>
                             {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
                           </div>
                         </div>
@@ -757,7 +835,7 @@ export default function App() {
                     records={attendance.filter(r => 
                       r.userId === user.uid && r.date.startsWith(format(currentMonth, 'yyyy-MM'))
                     )}
-                    color={roleColor}
+                    color={themeColor}
                   />
                 </div>
               )}
@@ -766,17 +844,17 @@ export default function App() {
             {/* Right Column: Main Content */}
             <div className="lg:col-span-8">
               {isAdminOrSuper ? (
-                <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                  <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className={cn("bg-white rounded-3xl shadow-xl border overflow-hidden transition-all duration-500", `border-${themeColor.primary}/20 shadow-${themeColor.primary}/5`)}>
+                  <div className={cn("p-6 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4", `border-${themeColor.primary}/10`, `bg-${themeColor.bg}/20`)}>
                     <div>
                       <h2 className="text-xl font-bold flex items-center gap-2">
-                        <Users className={cn("w-6 h-6", `text-${roleColor.primary}`)} />
+                        <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
                         Marquer la présence
                       </h2>
                       <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
                     </div>
                     {isToday(selectedDate) && (
-                      <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase", `bg-${roleColor.bg} text-${roleColor.text}`)}>Aujourd'hui</span>
+                      <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `bg-${themeColor.primary} text-white`)}>Aujourd'hui</span>
                     )}
                   </div>
 
