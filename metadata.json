@@ -1,5 +1,5 @@
 {
-  "name": "Attendance Tracker",
-  "description": "A simple attendance tracking app where only admins can mark presence and users can view their stats.",
+  "name": "Suivi de Présence",
+  "description": "Une application simple de suivi de présence où seuls les administrateurs peuvent marquer la présence et les utilisateurs peuvent consulter leurs statistiques.",
   "requestFramePermissions": []
 }
