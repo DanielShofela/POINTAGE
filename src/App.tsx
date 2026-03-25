@@ -419,48 +419,45 @@ const UserConsultationModal = ({
                   <Fingerprint className="w-4 h-4" />
                   Actions Biométriques
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <button 
-                    onClick={() => onRegisterBiometric(userProfile)}
-                    className={cn(
-                      "flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
-                      userProfile.credentials?.length 
-                        ? "bg-green-50 text-green-600 border-green-100" 
-                        : "bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100"
-                    )}
-                  >
-                    <Fingerprint className="w-4 h-4" />
-                    {userProfile.credentials?.length ? "Empreinte enregistrée" : "Enregistrer l'empreinte"}
-                  </button>
-
-                  <div className="flex gap-2">
+                <div className="grid grid-cols-1 gap-4">
+                  {!userProfile.credentials?.length ? (
                     <button 
-                      onClick={() => onBiometricCheck('check-in')}
-                      disabled={!!todayRecord?.checkIn}
-                      className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
-                        todayRecord?.checkIn 
-                          ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                          : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
-                      )}
+                      onClick={() => onRegisterBiometric(userProfile)}
+                      className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold transition-all border bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100"
                     >
-                      <LogIn className="w-4 h-4" />
-                      Arrivée
+                      <Fingerprint className="w-5 h-5" />
+                      Enregistrer l'empreinte
                     </button>
-                    <button 
-                      onClick={() => onBiometricCheck('check-out')}
-                      disabled={!!todayRecord?.checkOut}
-                      className={cn(
-                        "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
-                        todayRecord?.checkOut 
-                          ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
-                          : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900"
-                      )}
-                    >
-                      <LogOut className="w-4 h-4" />
-                      Départ
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => onBiometricCheck('check-in')}
+                        disabled={!!todayRecord?.checkIn}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
+                          todayRecord?.checkIn 
+                            ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                            : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 active:scale-95"
+                        )}
+                      >
+                        <LogIn className="w-5 h-5" />
+                        Arrivée
+                      </button>
+                      <button 
+                        onClick={() => onBiometricCheck('check-out')}
+                        disabled={!!todayRecord?.checkOut}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl font-bold transition-all border shadow-sm",
+                          todayRecord?.checkOut 
+                            ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                            : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900 active:scale-95"
+                        )}
+                      >
+                        <LogOut className="w-5 h-5" />
+                        Départ
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
