@@ -124,15 +124,13 @@ const LoadingScreen = () => (
 );
 
 const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date }: { title: string, records: AttendanceRecord[], periodLabel: string, totalUsers: number, date: Date }) => {
-  const presentCount = records.filter(r => r.status === 'present').length;
+  const dateStr = format(date, 'yyyy-MM-dd');
+  const dayRecords = records.filter(r => r.date === dateStr);
+  const presentCount = dayRecords.filter(r => r.status === 'present').length;
   
-  // Calculate total expected records up to today if it's the current month, or for the whole month if it's past
-  const start = startOfMonth(date);
-  const end = isSameDay(startOfMonth(new Date()), start) ? new Date() : endOfMonth(date);
-  const daysCount = eachDayOfInterval({ start, end }).length;
-  const totalExpected = daysCount * totalUsers;
-  
-  const absentCount = totalExpected - presentCount;
+  // Statistics for the selected day
+  const totalExpected = totalUsers;
+  const absentCount = Math.max(0, totalExpected - presentCount);
   const rate = totalExpected > 0 ? Math.round((presentCount / totalExpected) * 100) : 0;
 
   return (
@@ -179,14 +177,10 @@ const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date }: { tit
 
 const StatsCard = ({ title, records, periodLabel, date }: { title: string, records: AttendanceRecord[], periodLabel: string, date: Date }) => {
   const presentCount = records.filter(r => r.status === 'present').length;
+  const absentCount = records.filter(r => r.status === 'absent').length;
+  const totalRecords = records.length;
   
-  // Calculate total expected records up to today if it's the current month, or for the whole month if it's past
-  const start = startOfMonth(date);
-  const end = isSameDay(startOfMonth(new Date()), start) ? new Date() : endOfMonth(date);
-  const daysCount = eachDayOfInterval({ start, end }).length;
-  
-  const absentCount = daysCount - presentCount;
-  const rate = daysCount > 0 ? Math.round((presentCount / daysCount) * 100) : 0;
+  const rate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
@@ -447,18 +441,17 @@ export default function App() {
     try {
       if (existingRecord) {
         const hasCheckIn = type === 'checkIn' || !!existingRecord.checkIn;
-        const hasCheckOut = type === 'checkOut' || !!existingRecord.checkOut;
         
         await updateDoc(doc(db, 'attendance', existingRecord.id), {
           [type]: serverTimestamp(),
-          status: (hasCheckIn && hasCheckOut) ? 'present' : 'absent',
+          status: hasCheckIn ? 'present' : 'absent',
           timestamp: serverTimestamp()
         });
       } else {
         await addDoc(collection(db, 'attendance'), {
           userId,
           date: dateStr,
-          status: 'absent', // Only one time set, so absent
+          status: type === 'checkIn' ? 'present' : 'absent',
           markedBy: profile.uid,
           [type]: serverTimestamp(),
           timestamp: serverTimestamp()
@@ -819,13 +812,11 @@ export default function App() {
                   {/* Admin Stats Section (Moved to bottom) */}
                   <div className="p-6 bg-slate-50 border-t border-slate-100 space-y-8">
                     <AdminStatsGrid 
-                      title="Statistiques Mensuelles"
-                      periodLabel={format(currentMonth, 'MMMM yyyy', { locale: fr })}
-                      records={attendance.filter(r => 
-                        r.date.startsWith(format(currentMonth, 'yyyy-MM'))
-                      )}
+                      title="Statistiques du jour"
+                      periodLabel={format(selectedDate, 'dd MMMM yyyy', { locale: fr })}
+                      records={attendance}
                       totalUsers={allUsers.filter(u => u.role !== 'admin').length}
-                      date={currentMonth}
+                      date={selectedDate}
                     />
                   </div>
                 </div>
