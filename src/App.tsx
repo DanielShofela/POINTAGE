@@ -123,11 +123,17 @@ const LoadingScreen = () => (
   </div>
 );
 
-const AdminStatsGrid = ({ title, records, periodLabel }: { title: string, records: AttendanceRecord[], periodLabel: string }) => {
+const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date }: { title: string, records: AttendanceRecord[], periodLabel: string, totalUsers: number, date: Date }) => {
   const presentCount = records.filter(r => r.status === 'present').length;
-  const absentCount = records.filter(r => r.status === 'absent').length;
-  const total = presentCount + absentCount;
-  const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+  
+  // Calculate total expected records up to today if it's the current month, or for the whole month if it's past
+  const start = startOfMonth(date);
+  const end = isSameDay(startOfMonth(new Date()), start) ? new Date() : endOfMonth(date);
+  const daysCount = eachDayOfInterval({ start, end }).length;
+  const totalExpected = daysCount * totalUsers;
+  
+  const absentCount = totalExpected - presentCount;
+  const rate = totalExpected > 0 ? Math.round((presentCount / totalExpected) * 100) : 0;
 
   return (
     <div className="space-y-4">
@@ -171,11 +177,16 @@ const AdminStatsGrid = ({ title, records, periodLabel }: { title: string, record
   );
 };
 
-const StatsCard = ({ title, records, periodLabel }: { title: string, records: AttendanceRecord[], periodLabel: string }) => {
+const StatsCard = ({ title, records, periodLabel, date }: { title: string, records: AttendanceRecord[], periodLabel: string, date: Date }) => {
   const presentCount = records.filter(r => r.status === 'present').length;
-  const absentCount = records.filter(r => r.status === 'absent').length;
-  const total = presentCount + absentCount;
-  const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+  
+  // Calculate total expected records up to today if it's the current month, or for the whole month if it's past
+  const start = startOfMonth(date);
+  const end = isSameDay(startOfMonth(new Date()), start) ? new Date() : endOfMonth(date);
+  const daysCount = eachDayOfInterval({ start, end }).length;
+  
+  const absentCount = daysCount - presentCount;
+  const rate = daysCount > 0 ? Math.round((presentCount / daysCount) * 100) : 0;
 
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
@@ -642,6 +653,7 @@ export default function App() {
                     records={attendance.filter(r => 
                       r.userId === user.uid && r.date.startsWith(format(currentMonth, 'yyyy-MM'))
                     )}
+                    date={currentMonth}
                   />
                 </div>
               )}
@@ -703,14 +715,22 @@ export default function App() {
                                 </button>
                               </div>
                               <div className="text-xs text-slate-400">{u.email}</div>
-                              {record && (record.checkIn || record.checkOut) && (
-                                <div className="flex items-center gap-2 mt-1 text-[10px] font-bold text-indigo-500 uppercase">
-                                  <Clock className="w-3 h-3" />
-                                  {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--'} 
-                                  <ArrowRightLeft className="w-2 h-2" />
-                                  {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--'}
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className={cn(
+                                  "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
+                                  record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                )}>
+                                  {record?.status === 'present' ? 'Présent' : 'Absent'}
                                 </div>
-                              )}
+                                {record && (record.checkIn || record.checkOut) && (
+                                  <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-500 uppercase">
+                                    <Clock className="w-3 h-3" />
+                                    {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--'} 
+                                    <ArrowRightLeft className="w-2 h-2" />
+                                    {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--'}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -761,6 +781,8 @@ export default function App() {
                       records={attendance.filter(r => 
                         r.date.startsWith(format(currentMonth, 'yyyy-MM'))
                       )}
+                      totalUsers={allUsers.filter(u => u.role !== 'admin').length}
+                      date={currentMonth}
                     />
                   </div>
                 </div>
