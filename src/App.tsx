@@ -184,6 +184,15 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, targetProfile }: {
       }) as PublicKeyCredential;
 
       if (credential) {
+        // Explicitly verify that the returned credential ID matches one of the expected IDs
+        const returnedId = bufferToBase64(credential.rawId);
+        const isMatch = targetProfile.credentials.some(cred => cred.id === returnedId);
+
+        if (!isMatch) {
+          setError("Cette empreinte ne correspond pas à l'utilisateur sélectionné.");
+          return;
+        }
+
         setSuccess(true);
         await new Promise(resolve => setTimeout(resolve, 1000));
         onVerify(targetProfile.uid);
