@@ -47,7 +47,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO, startOfWeek, endOfWeek, isWithinInterval } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -144,14 +144,20 @@ const LoadingScreen = () => (
   </div>
 );
 
-const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: boolean, onClose: () => void, onVerify: () => void, type: 'check-in' | 'check-out', profile: UserProfile | null }) => {
+const BiometricModal = ({ isOpen, onClose, onVerify, type, targetProfile }: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onVerify: (uid?: string) => void, 
+  type: 'check-in' | 'check-out',
+  targetProfile: UserProfile | null
+}) => {
   const [verifying, setVerifying] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const startVerification = async () => {
-    if (!profile?.credentials?.length) {
-      setError("Aucune empreinte enregistrée. Veuillez d'abord en enregistrer une dans votre profil.");
+    if (!targetProfile?.credentials?.length) {
+      setError("Aucune empreinte enregistrée pour cet utilisateur.");
       return;
     }
 
@@ -162,7 +168,7 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: 
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
 
-      const allowCredentials = profile.credentials.map(cred => ({
+      const allowCredentials = targetProfile.credentials.map(cred => ({
         id: base64ToBuffer(cred.id),
         type: 'public-key' as const,
         transports: ['internal'] as AuthenticatorTransport[],
@@ -180,7 +186,7 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: 
       if (credential) {
         setSuccess(true);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        onVerify();
+        onVerify(targetProfile.uid);
         onClose();
       }
     } catch (err) {
@@ -231,9 +237,9 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: 
             {error && (
               <div className="mb-6">
                 <p className="text-red-500 text-sm font-medium mb-3">{error}</p>
-                {!profile?.credentials?.length && (
+                {!targetProfile?.credentials?.length && (
                   <p className="text-xs text-slate-400">
-                    Utilisez le bouton <span className="font-bold text-indigo-600">"Enregistrer l'empreinte"</span> dans le menu du haut pour commencer.
+                    L'administrateur doit d'abord enregistrer l'empreinte de l'utilisateur.
                   </p>
                 )}
               </div>
@@ -258,6 +264,256 @@ const BiometricModal = ({ isOpen, onClose, onVerify, type, profile }: { isOpen: 
 
             {verifying && <p className="text-indigo-600 font-bold animate-pulse">En attente du capteur...</p>}
             {success && <p className="text-green-600 font-bold">Identité vérifiée !</p>}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const AdminStatsGrid = ({ title, records, periodLabel }: { title: string, records: AttendanceRecord[], periodLabel: string }) => {
+  const presentCount = records.filter(r => r.status === 'present').length;
+  const absentCount = records.filter(r => r.status === 'absent').length;
+  const total = presentCount + absentCount;
+  const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-slate-700 flex items-center gap-2">
+          <BarChart3 className="w-4 h-4 text-indigo-600" />
+          {title}
+        </h3>
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{periodLabel}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+            </div>
+            <span className="text-slate-600 text-sm font-medium">Présences</span>
+          </div>
+          <span className="text-xl font-bold text-green-600">{presentCount}</span>
+        </div>
+        <div className="flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
+              <XCircle className="w-4 h-4 text-red-600" />
+            </div>
+            <span className="text-slate-600 text-sm font-medium">Absences</span>
+          </div>
+          <span className="text-xl font-bold text-red-600">{absentCount}</span>
+        </div>
+        <div className="flex items-center justify-between p-4 bg-indigo-600 rounded-2xl shadow-md shadow-indigo-100">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+              <BarChart3 className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-white/80 text-sm font-medium">Taux</span>
+          </div>
+          <span className="text-xl font-bold text-white">{rate}%</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StatsCard = ({ title, records, periodLabel }: { title: string, records: AttendanceRecord[], periodLabel: string }) => {
+  const presentCount = records.filter(r => r.status === 'present').length;
+  const absentCount = records.filter(r => r.status === 'absent').length;
+  const total = presentCount + absentCount;
+  const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+
+  return (
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="font-bold text-lg flex items-center gap-2">
+          <BarChart3 className="w-5 h-5 text-indigo-600" />
+          {title}
+        </h2>
+        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{periodLabel}</div>
+      </div>
+      
+      <div className="space-y-4">
+        <div className="flex items-center justify-between p-4 bg-green-50 rounded-2xl border border-green-100">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <span className="text-green-700 font-medium">Présent</span>
+          </div>
+          <span className="text-xl font-bold text-green-700">{presentCount}</span>
+        </div>
+        <div className="flex items-center justify-between p-4 bg-red-50 rounded-2xl border border-red-100">
+          <div className="flex items-center gap-3">
+            <XCircle className="w-5 h-5 text-red-600" />
+            <span className="text-red-700 font-medium">Absent</span>
+          </div>
+          <span className="text-xl font-bold text-red-700">{absentCount}</span>
+        </div>
+        <div className="pt-4 border-t border-slate-100 text-center">
+          <div className="text-3xl font-black text-indigo-600">{rate}%</div>
+          <div className="text-xs text-slate-400 uppercase tracking-wider font-bold">Taux de présence</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const UserConsultationModal = ({ 
+  isOpen, 
+  onClose, 
+  userProfile, 
+  attendanceRecords,
+  onRegisterBiometric,
+  onBiometricCheck
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  userProfile: UserProfile | null, 
+  attendanceRecords: AttendanceRecord[],
+  onRegisterBiometric: (u: UserProfile) => void,
+  onBiometricCheck: (type: 'check-in' | 'check-out') => void
+}) => {
+  if (!userProfile) return null;
+
+  const userRecords = attendanceRecords
+    .filter(r => r.userId === userProfile.uid)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const todayRecord = attendanceRecords.find(r => r.userId === userProfile.uid && r.date === format(new Date(), 'yyyy-MM-dd'));
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-indigo-600 text-white">
+              <div className="flex items-center gap-4">
+                <img 
+                  src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
+                  alt={userProfile.displayName} 
+                  className="w-12 h-12 rounded-2xl bg-white/20"
+                />
+                <div>
+                  <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
+                  <p className="text-indigo-100 text-sm">{userProfile.email}</p>
+                </div>
+              </div>
+              <button 
+                onClick={onClose}
+                className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
+              {/* Biometric Actions Section */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Fingerprint className="w-4 h-4" />
+                  Actions Biométriques
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => onRegisterBiometric(userProfile)}
+                    className={cn(
+                      "flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
+                      userProfile.credentials?.length 
+                        ? "bg-green-50 text-green-600 border-green-100" 
+                        : "bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100"
+                    )}
+                  >
+                    <Fingerprint className="w-4 h-4" />
+                    {userProfile.credentials?.length ? "Empreinte enregistrée" : "Enregistrer l'empreinte"}
+                  </button>
+
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => onBiometricCheck('check-in')}
+                      disabled={!!todayRecord?.checkIn}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
+                        todayRecord?.checkIn 
+                          ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                          : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
+                      )}
+                    >
+                      <LogIn className="w-4 h-4" />
+                      Arrivée
+                    </button>
+                    <button 
+                      onClick={() => onBiometricCheck('check-out')}
+                      disabled={!!todayRecord?.checkOut}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border",
+                        todayRecord?.checkOut 
+                          ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                          : "bg-slate-800 text-white border-slate-800 hover:bg-slate-900"
+                      )}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Départ
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Historique de présence</h4>
+                <div className="space-y-3">
+                  {userRecords.length > 0 ? (
+                    userRecords.map(record => (
+                      <div key={record.id} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center",
+                            record.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                          )}>
+                            {record.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                          </div>
+                          <div>
+                            <div className="font-bold text-slate-700 capitalize">
+                              {format(parseISO(record.date), 'EEEE d MMMM yyyy', { locale: fr })}
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
+                              <ArrowRightLeft className="w-2 h-2" />
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                          record.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                        )}>
+                          {record.status === 'present' ? 'Présent' : 'Absent'}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
+                      <CalendarIcon className="w-12 h-12 mx-auto mb-4 text-slate-200" />
+                      <p className="text-slate-400 font-medium">Aucun enregistrement trouvé</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-white">
+              <button 
+                onClick={onClose}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
@@ -310,6 +566,8 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isBioModalOpen, setIsBioModalOpen] = useState(false);
   const [bioType, setBioType] = useState<'check-in' | 'check-out'>('check-in');
+  const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
+  const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
 
   useEffect(() => {
@@ -434,13 +692,14 @@ export default function App() {
     }
   };
 
-  const handleSelfCheck = async () => {
-    if (!user || !user.uid) {
-      console.error('handleSelfCheck: No authenticated user');
+  const handleSelfCheck = async (targetUserId?: string) => {
+    const uid = targetUserId || user?.uid;
+    if (!uid) {
+      console.error('handleSelfCheck: No user ID provided');
       return;
     }
     const dateStr = format(new Date(), 'yyyy-MM-dd');
-    const existingRecord = attendance.find(r => r.userId === user.uid && r.date === dateStr);
+    const existingRecord = attendance.find(r => r.userId === uid && r.date === dateStr);
 
     try {
       if (bioType === 'check-in') {
@@ -453,10 +712,10 @@ export default function App() {
           });
         } else {
           await addDoc(collection(db, 'attendance'), {
-            userId: user.uid,
+            userId: uid,
             date: dateStr,
             status: 'present',
-            markedBy: 'self',
+            markedBy: profile?.role === 'admin' ? profile.uid : 'self',
             checkIn: serverTimestamp(),
             timestamp: serverTimestamp()
           });
@@ -465,10 +724,10 @@ export default function App() {
         if (!existingRecord) {
           // Allow check-out even if no check-in record exists
           await addDoc(collection(db, 'attendance'), {
-            userId: user.uid,
+            userId: uid,
             date: dateStr,
             status: 'present',
-            markedBy: 'self',
+            markedBy: profile?.role === 'admin' ? profile.uid : 'self',
             checkOut: serverTimestamp(),
             timestamp: serverTimestamp()
           });
@@ -486,14 +745,15 @@ export default function App() {
     }
   };
 
-  const handleRegisterFingerprint = async () => {
-    if (!user || !profile) return;
+  const handleRegisterFingerprint = async (targetUser?: UserProfile) => {
+    const target = targetUser || profile;
+    if (!user || !profile || !target) return;
 
     try {
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
 
-      const userID = new TextEncoder().encode(user.uid);
+      const userID = new TextEncoder().encode(target.uid);
 
       const credential = await navigator.credentials.create({
         publicKey: {
@@ -504,8 +764,8 @@ export default function App() {
           },
           user: {
             id: userID,
-            name: user.email || user.uid,
-            displayName: profile.displayName,
+            name: target.email || target.uid,
+            displayName: target.displayName,
           },
           pubKeyCredParams: [
             { alg: -7, type: "public-key" }, // ES256
@@ -527,11 +787,20 @@ export default function App() {
           counter: 0,
         };
 
-        const updatedCredentials = [...(profile.credentials || []), newCredential];
-        await updateDoc(doc(db, 'users', user.uid), {
+        const updatedCredentials = [...(target.credentials || []), newCredential];
+        await updateDoc(doc(db, 'users', target.uid), {
           credentials: updatedCredentials
         });
-        setProfile({ ...profile, credentials: updatedCredentials });
+        
+        if (target.uid === profile.uid) {
+          setProfile({ ...profile, credentials: updatedCredentials });
+        } else {
+          // Update allUsers state if admin is registering for someone else
+          setAllUsers(prev => prev.map(u => u.uid === target.uid ? { ...u, credentials: updatedCredentials } : u));
+          if (selectedUserForConsult?.uid === target.uid) {
+            setSelectedUserForConsult({ ...selectedUserForConsult, credentials: updatedCredentials });
+          }
+        }
         alert("Empreinte enregistrée avec succès !");
       }
     } catch (error) {
@@ -561,20 +830,6 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-4">
-              {profile?.role === 'user' && (
-                <button 
-                  onClick={handleRegisterFingerprint}
-                  className={cn(
-                    "hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                    profile.credentials?.length 
-                      ? "bg-green-50 text-green-600 border border-green-100" 
-                      : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"
-                  )}
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  {profile.credentials?.length ? "Empreinte active" : "Enregistrer l'empreinte"}
-                </button>
-              )}
               <div className="flex items-center gap-2 text-sm">
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="font-semibold text-slate-700">{profile?.displayName}</span>
@@ -633,26 +888,14 @@ export default function App() {
                       </div>
                     </div>
 
-                    {!todayRecord?.checkIn ? (
-                      <button 
-                        onClick={() => { setBioType('check-in'); setIsBioModalOpen(true); }}
-                        className="w-full flex items-center justify-center gap-3 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-95"
-                      >
-                        <Fingerprint className="w-5 h-5" />
-                        Pointer l'arrivée
-                      </button>
-                    ) : !todayRecord?.checkOut ? (
-                      <button 
-                        onClick={() => { setBioType('check-out'); setIsBioModalOpen(true); }}
-                        className="w-full flex items-center justify-center gap-3 bg-slate-800 text-white py-4 rounded-2xl font-bold hover:bg-slate-900 transition-all shadow-lg shadow-slate-200 active:scale-95"
-                      >
-                        <Fingerprint className="w-5 h-5" />
-                        Pointer le départ
-                      </button>
-                    ) : (
+                    {todayRecord?.checkIn && todayRecord?.checkOut ? (
                       <div className="w-full flex items-center justify-center gap-3 bg-green-50 text-green-600 py-4 rounded-2xl font-bold border border-green-100">
                         <CheckCircle2 className="w-5 h-5" />
                         Journée terminée
+                      </div>
+                    ) : (
+                      <div className="text-center p-4 bg-slate-50 rounded-2xl text-slate-400 text-sm italic">
+                        Le pointage digital doit être effectué par un administrateur.
                       </div>
                     )}
                   </div>
@@ -742,47 +985,28 @@ export default function App() {
                 )}
               </div>
 
-              {/* Stats Card */}
-              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-                <h2 className="font-bold text-lg flex items-center gap-2 mb-6">
-                  <BarChart3 className="w-5 h-5 text-indigo-600" />
-                  Stats Mensuelles
-                </h2>
-                
-                {(() => {
-                  const monthRecords = attendance.filter(r => 
-                    r.date.startsWith(format(currentMonth, 'yyyy-MM')) &&
-                    (profile?.role === 'admin' ? true : r.userId === user.uid)
-                  );
-                  const presentCount = monthRecords.filter(r => r.status === 'present').length;
-                  const absentCount = monthRecords.filter(r => r.status === 'absent').length;
-                  const total = presentCount + absentCount;
-                  const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
-
-                  return (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-4 bg-green-50 rounded-2xl border border-green-100">
-                        <div className="flex items-center gap-3">
-                          <CheckCircle2 className="w-5 h-5 text-green-600" />
-                          <span className="text-green-700 font-medium">Présent</span>
-                        </div>
-                        <span className="text-xl font-bold text-green-700">{presentCount}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-4 bg-red-50 rounded-2xl border border-red-100">
-                        <div className="flex items-center gap-3">
-                          <XCircle className="w-5 h-5 text-red-600" />
-                          <span className="text-red-700 font-medium">Absent</span>
-                        </div>
-                        <span className="text-xl font-bold text-red-700">{absentCount}</span>
-                      </div>
-                      <div className="pt-4 border-t border-slate-100 text-center">
-                        <div className="text-3xl font-black text-indigo-600">{rate}%</div>
-                        <div className="text-xs text-slate-400 uppercase tracking-wider font-bold">Taux de présence</div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
+              {/* Stats Section (Only for non-admins here) */}
+              {profile?.role !== 'admin' && (
+                <div className="space-y-6">
+                  <StatsCard 
+                    title="Stats Hebdomadaires"
+                    periodLabel="Cette semaine"
+                    records={attendance.filter(r => {
+                      const recordDate = parseISO(r.date);
+                      const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+                      const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
+                      return r.userId === user.uid && isWithinInterval(recordDate, { start: weekStart, end: weekEnd });
+                    })}
+                  />
+                  <StatsCard 
+                    title="Stats Mensuelles"
+                    periodLabel={format(currentMonth, 'MMMM yyyy', { locale: fr })}
+                    records={attendance.filter(r => 
+                      r.userId === user.uid && r.date.startsWith(format(currentMonth, 'yyyy-MM'))
+                    )}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Right Column: Main Content */}
@@ -809,13 +1033,37 @@ export default function App() {
                       return (
                         <div key={u.uid || `user-${index}`} className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
                           <div className="flex items-center gap-4">
-                            <img 
-                              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} 
-                              alt={u.displayName} 
-                              className="w-12 h-12 rounded-2xl bg-slate-100"
-                            />
+                            <button 
+                              onClick={() => {
+                                setSelectedUserForConsult(u);
+                                setIsConsultModalOpen(true);
+                              }}
+                              className="relative group"
+                              title="Consulter le profil"
+                            >
+                              <img 
+                                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} 
+                                alt={u.displayName} 
+                                className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:ring-2 group-hover:ring-indigo-400 transition-all"
+                              />
+                              <div className="absolute inset-0 flex items-center justify-center bg-indigo-600/0 group-hover:bg-indigo-600/20 rounded-2xl transition-all">
+                                <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-all" />
+                              </div>
+                            </button>
                             <div>
-                              <div className="font-bold text-slate-800">{u.displayName}</div>
+                              <div className="font-bold text-slate-800 flex items-center gap-2">
+                                {u.displayName}
+                                <button 
+                                  onClick={() => {
+                                    setSelectedUserForConsult(u);
+                                    setIsConsultModalOpen(true);
+                                  }}
+                                  className="p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-400 hover:text-indigo-600"
+                                  title="Consulter le profil"
+                                >
+                                  <UserIcon className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                               <div className="text-xs text-slate-400">{u.email}</div>
                               {record && (record.checkIn || record.checkOut) && (
                                 <div className="flex items-center gap-2 mt-1 text-[10px] font-bold text-indigo-500 uppercase">
@@ -893,6 +1141,27 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  {/* Admin Stats Section (Moved to bottom) */}
+                  <div className="p-6 bg-slate-50 border-t border-slate-100 space-y-8">
+                    <AdminStatsGrid 
+                      title="Statistiques Hebdomadaires"
+                      periodLabel="Cette semaine"
+                      records={attendance.filter(r => {
+                        const recordDate = parseISO(r.date);
+                        const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+                        const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
+                        return isWithinInterval(recordDate, { start: weekStart, end: weekEnd });
+                      })}
+                    />
+                    <AdminStatsGrid 
+                      title="Statistiques Mensuelles"
+                      periodLabel={format(currentMonth, 'MMMM yyyy', { locale: fr })}
+                      records={attendance.filter(r => 
+                        r.date.startsWith(format(currentMonth, 'yyyy-MM'))
+                      )}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-8">
@@ -949,7 +1218,19 @@ export default function App() {
           onClose={() => setIsBioModalOpen(false)} 
           onVerify={handleSelfCheck}
           type={bioType}
-          profile={profile}
+          targetProfile={selectedUserForConsult}
+        />
+
+        <UserConsultationModal
+          isOpen={isConsultModalOpen}
+          onClose={() => setIsConsultModalOpen(false)}
+          userProfile={selectedUserForConsult}
+          attendanceRecords={attendance}
+          onRegisterBiometric={handleRegisterFingerprint}
+          onBiometricCheck={(type) => {
+            setBioType(type);
+            setIsBioModalOpen(true);
+          }}
         />
       </div>
     </ErrorBoundary>
