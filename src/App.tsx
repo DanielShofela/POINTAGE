@@ -705,23 +705,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {profile?.role === 'ouvrier' && profile.dailyRate && (
-                      <div className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500", `bg-${themeColor.bg} border-${themeColor.ring}`)}>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie cumulée</div>
-                          <div className={cn("text-xl font-black", `text-${themeColor.primary}`)}>
-                            {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Présences</div>
-                          <div className="text-lg font-bold text-slate-700">
-                            {workerStats?.[profile.uid]?.presentDays || 0} j
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
                     {todayRecord?.checkIn && todayRecord?.checkOut ? (
                       <div className="w-full flex items-center justify-center gap-3 bg-green-50 text-green-600 py-4 rounded-2xl font-bold border border-green-100">
                         <CheckCircle2 className="w-5 h-5" />
@@ -731,6 +714,27 @@ export default function App() {
                       <div className="text-center p-4 bg-slate-50 rounded-2xl text-slate-400 text-sm italic">
                         Le pointage digital doit être effectué par un administrateur ou superviseur.
                       </div>
+                    )}
+
+                    {profile?.role === 'ouvrier' && profile.dailyRate && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500 shadow-sm", `bg-${themeColor.bg} border-${themeColor.ring}`)}
+                      >
+                        <div>
+                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie Actualisée</div>
+                          <div className={cn("text-xl font-black", `text-${themeColor.primary}`)}>
+                            {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours validés</div>
+                          <div className="text-lg font-bold text-slate-700">
+                            {workerStats?.[profile.uid]?.presentDays || 0} j
+                          </div>
+                        </div>
+                      </motion.div>
                     )}
                   </div>
                 </div>
