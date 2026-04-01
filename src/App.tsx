@@ -414,15 +414,16 @@ export default function App() {
   const [tempTime, setTempTime] = useState('');
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        // Listen to the user's profile in real-time
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const unsubProfile = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
             setProfile({ uid: userDoc.id, ...userDoc.data() } as UserProfile);
           } else {
-            // Create default profile
+            // Create default profile if it doesn't exist
             const isDefaultAdmin = currentUser.email === 'daniel.shofela01@gmail.com';
             const newProfile: UserProfile = {
               uid: currentUser.uid,
@@ -430,16 +431,24 @@ export default function App() {
               displayName: currentUser.displayName || 'Anonyme',
               role: isDefaultAdmin ? 'admin' : 'personnel'
             };
-            await setDoc(doc(db, 'users', currentUser.uid), newProfile);
-            setProfile(newProfile);
+            try {
+              await setDoc(doc(db, 'users', currentUser.uid), newProfile);
+              // setProfile will be triggered by onSnapshot
+            } catch (error) {
+              handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
+            }
           }
-        } catch (error) {
+          setLoading(false);
+        }, (error) => {
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
-        }
+          setLoading(false);
+        });
+
+        return () => unsubProfile();
       } else {
         setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -476,18 +485,27 @@ export default function App() {
 
   // Calculate worker pay
   const workerStats = useMemo(() => {
-    if (!profile || (profile.role !== 'ouvrier' && profile.role !== 'admin' && profile.role !== 'superviseur')) return null;
+    if (!profile) return null;
     
     const stats: Record<string, { presentDays: number, totalPay: number }> = {};
     
-    allUsers.filter(u => u.role === 'ouvrier').forEach(worker => {
-      const workerRecords = attendance.filter(r => r.userId === worker.uid && r.status === 'present');
-      const dailyRate = worker.dailyRate || 0;
-      stats[worker.uid] = {
+    if (profile.role === 'admin' || profile.role === 'superviseur') {
+      allUsers.filter(u => u.role === 'ouvrier').forEach(worker => {
+        const workerRecords = attendance.filter(r => r.userId === worker.uid && r.status === 'present');
+        const dailyRate = worker.dailyRate || 0;
+        stats[worker.uid] = {
+          presentDays: workerRecords.length,
+          totalPay: workerRecords.length * dailyRate
+        };
+      });
+    } else if (profile.role === 'ouvrier') {
+      const workerRecords = attendance.filter(r => r.userId === profile.uid && r.status === 'present');
+      const dailyRate = profile.dailyRate || 0;
+      stats[profile.uid] = {
         presentDays: workerRecords.length,
         totalPay: workerRecords.length * dailyRate
       };
-    });
+    }
     return stats;
   }, [profile, allUsers, attendance]);
 
