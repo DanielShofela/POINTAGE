@@ -238,12 +238,14 @@ const UserConsultationModal = ({
   onClose, 
   userProfile, 
   attendanceRecords,
+  workerStats,
   color
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   userProfile: UserProfile | null, 
   attendanceRecords: AttendanceRecord[],
+  workerStats: Record<string, { presentDays: number, totalPay: number }> | null,
   color?: { primary: string, bg: string, text: string, ring: string }
 }) => {
   if (!userProfile) return null;
@@ -253,6 +255,7 @@ const UserConsultationModal = ({
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const uColor = ROLE_COLORS[userProfile.role] || ROLE_COLORS.personnel;
+  const stats = workerStats?.[userProfile.uid];
 
   return (
     <AnimatePresence>
@@ -285,6 +288,24 @@ const UserConsultationModal = ({
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
+              {userProfile.role === 'ouvrier' && stats && (
+                <div className="bg-white p-6 rounded-3xl border border-orange-100 shadow-sm flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center">
+                      <BarChart3 className="w-6 h-6 text-orange-600" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Salaire Total Cumulé</div>
+                      <div className="text-2xl font-black text-orange-600">{stats.totalPay.toLocaleString()} FCFA</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours Présents</div>
+                    <div className="text-xl font-bold text-slate-700">{stats.presentDays} jours</div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Historique des 7 derniers jours</h4>
                 <div className="space-y-3">
@@ -389,6 +410,8 @@ export default function App() {
   const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
+  const [tempTime, setTempTime] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -468,7 +491,7 @@ export default function App() {
     return stats;
   }, [profile, allUsers, attendance]);
 
-  const handleSetTime = async (userId: string, type: 'checkIn' | 'checkOut') => {
+  const handleSetTime = async (userId: string, type: 'checkIn' | 'checkOut', specificTime?: string) => {
     if (!profile || (profile.role !== 'admin' && profile.role !== 'superviseur') || !userId || userId === 'undefined') {
       console.error('handleSetTime: Missing userId or unauthorized');
       return;
@@ -476,10 +499,14 @@ export default function App() {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const existingRecord = attendance.find(r => r.userId === userId && r.date === dateStr);
 
-    // Prevent overwriting existing time
-    if (existingRecord && existingRecord[type]) {
-      console.warn(`handleSetTime: ${type} already set for user ${userId} on ${dateStr}`);
-      return;
+    let timestamp;
+    if (specificTime) {
+      const [hours, minutes] = specificTime.split(':').map(Number);
+      const timeDate = new Date(selectedDate);
+      timeDate.setHours(hours, minutes, 0, 0);
+      timestamp = Timestamp.fromDate(timeDate);
+    } else {
+      timestamp = serverTimestamp();
     }
 
     try {
@@ -487,7 +514,7 @@ export default function App() {
         const hasCheckIn = type === 'checkIn' || !!existingRecord.checkIn;
         
         await updateDoc(doc(db, 'attendance', existingRecord.id), {
-          [type]: serverTimestamp(),
+          [type]: timestamp,
           status: hasCheckIn ? 'present' : 'absent',
           timestamp: serverTimestamp()
         });
@@ -497,7 +524,7 @@ export default function App() {
           date: dateStr,
           status: type === 'checkIn' ? 'present' : 'absent',
           markedBy: profile.uid,
-          [type]: serverTimestamp(),
+          [type]: timestamp,
           timestamp: serverTimestamp()
         });
       }
@@ -893,32 +920,98 @@ export default function App() {
                           <div className="flex flex-col gap-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => handleSetTime(u.uid, 'checkIn')}
-                                  disabled={!!record?.checkIn}
-                                  className={cn(
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                                    record?.checkIn 
-                                      ? `bg-${uColor.bg} text-${uColor.text} cursor-not-allowed opacity-80` 
-                                      : "bg-slate-50 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
-                                  )}
-                                >
-                                  <Clock className="w-3 h-3" />
-                                  {record?.checkIn ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
-                                </button>
-                                <button 
-                                  onClick={() => handleSetTime(u.uid, 'checkOut')}
-                                  disabled={!!record?.checkOut}
-                                  className={cn(
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                                    record?.checkOut 
-                                      ? "bg-slate-100 text-slate-700 cursor-not-allowed opacity-80" 
-                                      : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
-                                  )}
-                                >
-                                  <Clock className="w-3 h-3" />
-                                  {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
-                                </button>
+                                {editingTime?.userId === u.uid && editingTime?.type === 'checkIn' ? (
+                                  <div className="flex items-center gap-1">
+                                    <input 
+                                      type="time" 
+                                      value={tempTime}
+                                      onChange={(e) => setTempTime(e.target.value)}
+                                      className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
+                                    />
+                                    <button 
+                                      onClick={() => {
+                                        handleSetTime(u.uid, 'checkIn', tempTime);
+                                        setEditingTime(null);
+                                      }}
+                                      className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={() => setEditingTime(null)}
+                                      className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
+                                    >
+                                      <XCircle className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => {
+                                      if (record?.checkIn) {
+                                        setEditingTime({ userId: u.uid, type: 'checkIn' });
+                                        setTempTime(format(record.checkIn.toDate(), 'HH:mm'));
+                                      } else {
+                                        handleSetTime(u.uid, 'checkIn');
+                                      }
+                                    }}
+                                    className={cn(
+                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                      record?.checkIn 
+                                        ? `bg-${uColor.bg} text-${uColor.text} hover:bg-${uColor.ring}` 
+                                        : "bg-slate-50 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                                    )}
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                    {record?.checkIn ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
+                                  </button>
+                                )}
+
+                                {editingTime?.userId === u.uid && editingTime?.type === 'checkOut' ? (
+                                  <div className="flex items-center gap-1">
+                                    <input 
+                                      type="time" 
+                                      value={tempTime}
+                                      onChange={(e) => setTempTime(e.target.value)}
+                                      className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
+                                    />
+                                    <button 
+                                      onClick={() => {
+                                        handleSetTime(u.uid, 'checkOut', tempTime);
+                                        setEditingTime(null);
+                                      }}
+                                      className="p-1 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={() => setEditingTime(null)}
+                                      className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
+                                    >
+                                      <XCircle className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => {
+                                      if (record?.checkOut) {
+                                        setEditingTime({ userId: u.uid, type: 'checkOut' });
+                                        setTempTime(format(record.checkOut.toDate(), 'HH:mm'));
+                                      } else {
+                                        handleSetTime(u.uid, 'checkOut');
+                                      }
+                                    }}
+                                    className={cn(
+                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                      record?.checkOut 
+                                        ? "bg-slate-100 text-slate-700 hover:bg-slate-200" 
+                                        : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
+                                    )}
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                    {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
+                                  </button>
+                                )}
+                                
                                 <button 
                                   onClick={() => handleSetAbsent(u.uid)}
                                   className={cn(
@@ -1046,6 +1139,7 @@ export default function App() {
           onClose={() => setIsConsultModalOpen(false)}
           userProfile={selectedUserForConsult}
           attendanceRecords={attendance}
+          workerStats={workerStats}
           color={roleColor}
         />
       </div>
