@@ -57,8 +57,6 @@ import { fr } from 'date-fns/locale';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-const appleProvider = new OAuthProvider('apple.com');
-
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -382,13 +380,15 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLogin = async (provider: 'google' | 'apple') => {
+  const handleLogin = async (provider: 'google') => {
     setLoginError(null);
     try {
-      await signInWithPopup(auth, provider === 'google' ? googleProvider : appleProvider);
+      await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
         setLoginError('La fenêtre de connexion a été fermée avant la fin.');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setLoginError(`ERREUR : La connexion Google n'est pas activée ou est mal configurée dans la console Firebase.`);
       } else {
         setLoginError('Une erreur est survenue lors de la connexion.');
         console.error('Login failed:', error);
@@ -424,7 +424,7 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
       }
 
       if (error.code === 'auth/operation-not-allowed') {
-        setLoginError('La connexion par identifiants n\'est pas activée dans la console Firebase. Contactez l\'administrateur.');
+        setLoginError('ERREUR : La méthode de connexion par "Email/Password" n\'est pas activée dans la console Firebase. Veuillez l\'activer pour utiliser la connexion par identifiants.');
       } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError('Nom d\'utilisateur ou mot de passe incorrect.');
       } else {
@@ -484,13 +484,6 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
             >
               <LogIn className="w-5 h-5" />
               Se connecter avec Google
-            </button>
-            <button 
-              onClick={() => handleLogin('apple')}
-              className="w-full flex items-center justify-center gap-3 bg-black text-white py-4 rounded-2xl font-bold hover:bg-zinc-900 transition-all hover:shadow-lg hover:shadow-zinc-200 active:scale-[0.98]"
-            >
-              <LogIn className="w-5 h-5" />
-              Se connecter avec Apple
             </button>
           </div>
         ) : (
@@ -582,12 +575,12 @@ export default function App() {
               await setDoc(doc(db, 'users', currentUser.uid), newProfile);
               // setProfile will be triggered by onSnapshot
             } catch (error) {
-              handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
+              handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`, currentUser);
             }
           }
           setLoading(false);
         }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
+          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`, currentUser);
           setLoading(false);
         });
 
@@ -608,10 +601,10 @@ export default function App() {
       const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
         const users = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
         setAllUsers(users);
-      }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'users', user));
       return () => unsubscribe();
     }
-  }, [profile]);
+  }, [profile, user]);
 
   // Fetch attendance records
   useEffect(() => {
@@ -626,7 +619,7 @@ export default function App() {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
         setAttendance(records);
-      }, (error) => handleFirestoreError(error, OperationType.LIST, 'attendance'));
+      }, (error) => handleFirestoreError(error, OperationType.LIST, 'attendance', user));
       return () => unsubscribe();
     }
   }, [user, profile]);
@@ -695,7 +688,7 @@ export default function App() {
         });
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+      handleFirestoreError(error, OperationType.WRITE, 'attendance', user);
     }
   };
 
@@ -709,6 +702,9 @@ export default function App() {
       
       // If username/password provided, create a real Firebase Auth account
       if (cleanUsername && newUser.password) {
+        if (newUser.password.length < 6) {
+          throw new Error('Le mot de passe doit contenir au moins 6 caractères.');
+        }
         const email = `${cleanUsername}@attendance.app`;
         try {
           const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, newUser.password);
@@ -718,6 +714,9 @@ export default function App() {
         } catch (authError: any) {
           if (authError.code === 'auth/email-already-in-use') {
             throw new Error('Ce nom d\'utilisateur est déjà utilisé.');
+          }
+          if (authError.code === 'auth/weak-password') {
+            throw new Error('Le mot de passe est trop court (minimum 6 caractères).');
           }
           throw authError;
         }
@@ -772,7 +771,7 @@ export default function App() {
         });
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attendance');
+      handleFirestoreError(error, OperationType.WRITE, 'attendance', user);
     }
   };
 
@@ -805,7 +804,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'users', userId), { role: newRole });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${userId}`, user);
     }
   };
 
@@ -814,7 +813,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, 'users', userId), { dailyRate: rate });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${userId}`);
+      handleFirestoreError(error, OperationType.WRITE, `users/${userId}`, user);
     }
   };
 
@@ -1441,6 +1440,11 @@ export default function App() {
                           {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                      {newUser.password && newUser.password.length < 6 && (
+                        <p className="text-[10px] text-red-500 font-medium mt-1 ml-1">
+                          Minimum 6 caractères
+                        </p>
+                      )}
                     </div>
                   </div>
 
