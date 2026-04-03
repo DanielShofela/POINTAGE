@@ -8,6 +8,7 @@ import {
   auth, 
   db, 
   googleProvider, 
+  OAuthProvider,
   secondaryAuth,
   signInWithPopup, 
   signOut, 
@@ -55,6 +56,8 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMont
 import { fr } from 'date-fns/locale';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+
+const appleProvider = new OAuthProvider('apple.com');
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -376,12 +379,13 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
   const [loginType, setLoginType] = useState<'google' | 'manual'>('google');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleLogin = async () => {
+  const handleLogin = async (provider: 'google' | 'apple') => {
     setLoginError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithPopup(auth, provider === 'google' ? googleProvider : appleProvider);
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') {
         setLoginError('La fenêtre de connexion a été fermée avant la fin.');
@@ -473,13 +477,22 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
         </div>
 
         {loginType === 'google' ? (
-          <button 
-            onClick={handleLogin}
-            className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98]"
-          >
-            <LogIn className="w-5 h-5" />
-            Se connecter avec Google
-          </button>
+          <div className="space-y-3">
+            <button 
+              onClick={() => handleLogin('google')}
+              className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98]"
+            >
+              <LogIn className="w-5 h-5" />
+              Se connecter avec Google
+            </button>
+            <button 
+              onClick={() => handleLogin('apple')}
+              className="w-full flex items-center justify-center gap-3 bg-black text-white py-4 rounded-2xl font-bold hover:bg-zinc-900 transition-all hover:shadow-lg hover:shadow-zinc-200 active:scale-[0.98]"
+            >
+              <LogIn className="w-5 h-5" />
+              Se connecter avec Apple
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleManualLogin} className="space-y-4 text-left">
             <div className="space-y-2">
@@ -495,14 +508,23 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
             </div>
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe</label>
-              <input 
-                type="password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                placeholder="Votre mot de passe"
-                required
-              />
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all pr-12"
+                  placeholder="Votre mot de passe"
+                  required
+                />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
             <button 
               type="submit"
@@ -535,6 +557,7 @@ export default function App() {
   const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
   const [tempTime, setTempTime] = useState('');
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [newUser, setNewUser] = useState({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
 
   useEffect(() => {
@@ -1402,13 +1425,22 @@ export default function App() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe</label>
-                      <input 
-                        type="password" 
-                        value={newUser.password}
-                        onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                        placeholder="Optionnel"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                      />
+                      <div className="relative">
+                        <input 
+                          type={showNewUserPassword ? "text" : "password"} 
+                          value={newUser.password}
+                          onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                          placeholder="Optionnel"
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all pr-10"
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                   </div>
 

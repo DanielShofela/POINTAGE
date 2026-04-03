@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   GoogleAuthProvider, 
+  OAuthProvider,
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
@@ -75,5 +76,5 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-export { signInWithPopup, signOut, onAuthStateChanged, collection, doc, getDoc, setDoc, getDocs, query, where, onSnapshot, Timestamp, serverTimestamp, addDoc, updateDoc, deleteDoc };
+export { OAuthProvider, signInWithPopup, signOut, onAuthStateChanged, collection, doc, getDoc, setDoc, getDocs, query, where, onSnapshot, Timestamp, serverTimestamp, addDoc, updateDoc, deleteDoc };
 export type { User };
