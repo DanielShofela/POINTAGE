@@ -8,6 +8,7 @@ import {
   auth, 
   db, 
   googleProvider, 
+  secondaryAuth,
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
@@ -27,6 +28,10 @@ import {
   handleFirestoreError,
   User
 } from './firebase';
+import { 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword
+} from 'firebase/auth';
 import { 
   LogOut, 
   LogIn, 
@@ -393,17 +398,16 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
     setIsLoggingIn(true);
     setLoginError(null);
     try {
-      const q = query(collection(db, 'users'), where('username', '==', username), where('password', '==', password));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const userData = { uid: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserProfile;
-        onManualLogin(userData);
-      } else {
+      const email = `${username}@attendance.app`;
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will handle the rest
+    } catch (error: any) {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError('Nom d\'utilisateur ou mot de passe incorrect.');
+      } else {
+        setLoginError('Erreur lors de la connexion.');
+        console.error(error);
       }
-    } catch (error) {
-      setLoginError('Erreur lors de la connexion.');
-      console.error(error);
     } finally {
       setIsLoggingIn(false);
     }
@@ -499,10 +503,9 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [manualUser, setManualUser] = useState<UserProfile | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -516,16 +519,6 @@ export default function App() {
   const [newUser, setNewUser] = useState({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
 
   useEffect(() => {
-    // Check for manual session first
-    const savedManualUser = localStorage.getItem('manualUser');
-    if (savedManualUser) {
-      const parsed = JSON.parse(savedManualUser);
-      setManualUser(parsed);
-      setUser(parsed);
-      setProfile(parsed);
-      setLoading(false);
-    }
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
@@ -557,7 +550,7 @@ export default function App() {
         });
 
         return () => unsubProfile();
-      } else if (!savedManualUser) {
+      } else {
         setUser(null);
         setProfile(null);
         setLoading(false);
@@ -666,21 +659,45 @@ export default function App() {
 
   const handleAddUser = async () => {
     if (!newUser.displayName) return;
-    const manualUid = `manual_${Date.now()}`;
-    const userDoc: UserProfile = {
-      uid: manualUid,
-      displayName: newUser.displayName,
-      role: newUser.role as UserProfile['role'],
-      dailyRate: newUser.dailyRate,
-      username: newUser.username || undefined,
-      password: newUser.password || undefined
-    };
+    
+    setLoading(true);
     try {
-      await setDoc(doc(db, 'users', manualUid), userDoc);
+      let uid = `manual_${Date.now()}`;
+      
+      // If username/password provided, create a real Firebase Auth account
+      if (newUser.username && newUser.password) {
+        const email = `${newUser.username}@attendance.app`;
+        try {
+          const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, newUser.password);
+          uid = userCredential.user.uid;
+          // Log out the secondary app immediately to be safe
+          await signOut(secondaryAuth);
+        } catch (authError: any) {
+          if (authError.code === 'auth/email-already-in-use') {
+            throw new Error('Ce nom d\'utilisateur est déjà utilisé.');
+          }
+          throw authError;
+        }
+      }
+
+      const userDoc: UserProfile = {
+        uid: uid,
+        displayName: newUser.displayName,
+        role: newUser.role as UserProfile['role'],
+        dailyRate: newUser.dailyRate,
+        username: newUser.username || undefined,
+        // We don't store the password in the document anymore for security, 
+        // Firebase Auth handles it.
+      };
+      
+      await setDoc(doc(db, 'users', uid), userDoc);
       setIsAddUserModalOpen(false);
       setNewUser({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${manualUid}`);
+    } catch (error: any) {
+      alert(error.message || 'Erreur lors de la création de l\'utilisateur');
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -716,8 +733,6 @@ export default function App() {
 
   const logout = () => {
     signOut(auth);
-    setManualUser(null);
-    localStorage.removeItem('manualUser');
     setUser(null);
     setProfile(null);
   };
@@ -738,12 +753,7 @@ export default function App() {
   }, [roleColor]);
 
   if (loading) return <LoadingScreen />;
-  if (!user) return <LoginScreen onManualLogin={(userData) => {
-    setManualUser(userData);
-    setUser(userData);
-    setProfile(userData);
-    localStorage.setItem('manualUser', JSON.stringify(userData));
-  }} />;
+  if (!user) return <LoginScreen onManualLogin={() => {}} />;
 
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;

@@ -40,16 +40,14 @@ service cloud.firestore {
     function isPrivileged() {
       return isAuthenticated() && (
         (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur'])
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur'])
       );
     }
 
     function isAdmin() {
       return isAuthenticated() && (
         (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
     }
 
@@ -78,7 +76,12 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isPrivileged());
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur'])
+      );
       
       // Allow unauthenticated list for manual login (should be restricted in production)
       allow list: if true;
@@ -98,7 +101,12 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow read: if isAuthenticated() && (isPrivileged() || resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated() && (
+        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur']) ||
+        resource.data.userId == request.auth.uid
+      );
       
       // Privileged users (admin/super) can create/update any attendance
       allow create: if (isPrivileged() && isValidAttendance(request.resource.data)) ||
