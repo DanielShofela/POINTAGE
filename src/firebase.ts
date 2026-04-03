@@ -7,8 +7,9 @@ import {
   signOut, 
   onAuthStateChanged, 
   User,
-  setPersistence,
-  inMemoryPersistence
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink
 } from 'firebase/auth';
 import { getFirestore, collection, doc, getDoc, setDoc, getDocs, query, where, onSnapshot, Timestamp, serverTimestamp, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -18,12 +19,6 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-
-// Secondary app for creating users without logging out the admin
-const secondaryApp = initializeApp(firebaseConfig, "Secondary");
-export const secondaryAuth = getAuth(secondaryApp);
-// Set persistence to NONE (inMemoryPersistence) to avoid session conflicts
-setPersistence(secondaryAuth, inMemoryPersistence).catch(console.error);
 
 export enum OperationType {
   CREATE = 'create',
@@ -77,5 +72,26 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-export { OAuthProvider, signInWithPopup, signOut, onAuthStateChanged, collection, doc, getDoc, setDoc, getDocs, query, where, onSnapshot, Timestamp, serverTimestamp, addDoc, updateDoc, deleteDoc };
+export { 
+  OAuthProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged, 
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  collection, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  getDocs, 
+  query, 
+  where, 
+  onSnapshot, 
+  Timestamp, 
+  serverTimestamp, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc 
+};
 export type { User };

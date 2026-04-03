@@ -9,7 +9,6 @@ import {
   db, 
   googleProvider, 
   OAuthProvider,
-  secondaryAuth,
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
@@ -49,7 +48,9 @@ import {
   Clock,
   ArrowRightLeft,
   Eye,
-  EyeOff
+  EyeOff,
+  UserPlus,
+  Ban
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO, subDays, isBefore, startOfDay } from 'date-fns';
@@ -73,6 +74,8 @@ interface UserProfile {
   displayName: string;
   role: UserRole;
   dailyRate?: number; // Pour les ouvriers
+  suspended?: boolean;
+  createdAt?: Timestamp;
 }
 
 const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string, ring: string, border: string }> = {
@@ -372,11 +375,12 @@ const UserConsultationModal = ({
   );
 };
 
-const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => void }) => {
+const LoginScreen = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [loginType, setLoginType] = useState<'google' | 'manual'>('google');
+  const [loginType, setLoginType] = useState<'google' | 'manual' | 'register'>('google');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -404,32 +408,71 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
     setLoginError(null);
     try {
       const email = `${cleanUsername}@attendance.app`;
+      console.log(`Attempting login for: ${email}`);
       await signInWithEmailAndPassword(auth, email, password);
       // onAuthStateChanged will handle the rest
     } catch (error: any) {
-      // Check if it's a legacy user (created before Auth integration)
-      try {
-        const q = query(collection(db, 'users'), where('username', '==', cleanUsername));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          const userData = snapshot.docs[0].data() as UserProfile;
-          if (userData.uid.startsWith('manual_')) {
-            setLoginError("Ce compte a été créé avec l'ancien système. Veuillez demander à l'administrateur de supprimer et recréer votre compte.");
-            setIsLoggingIn(false);
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('Error checking legacy user:', e);
-      }
-
+      console.error('Login error details:', error.code, error.message);
+      
       if (error.code === 'auth/operation-not-allowed') {
         setLoginError('ERREUR : La méthode de connexion par "Email/Password" n\'est pas activée dans la console Firebase. Veuillez l\'activer pour utiliser la connexion par identifiants.');
       } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError('Nom d\'utilisateur ou mot de passe incorrect.');
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError('Format du nom d\'utilisateur invalide (ne doit pas contenir d\'espaces).');
       } else {
-        setLoginError('Erreur lors de la connexion.');
-        console.error(error);
+        setLoginError(`Erreur lors de la connexion: ${error.message}`);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUsername = username.trim().toLowerCase();
+    if (!cleanUsername || !password || !displayName) {
+      setLoginError('Veuillez remplir tous les champs.');
+      return;
+    }
+    
+    if (cleanUsername.includes(' ')) {
+      setLoginError('Le nom d\'utilisateur ne doit pas contenir d\'espaces.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setLoginError('Le mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const email = `${cleanUsername}@attendance.app`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
+
+      const userDoc: UserProfile = {
+        uid: uid,
+        displayName: displayName,
+        role: 'personnel',
+        username: cleanUsername,
+        suspended: false,
+        createdAt: Timestamp.now()
+      };
+      
+      await setDoc(doc(db, 'users', uid), userDoc);
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        setLoginError('Ce nom d\'utilisateur est déjà utilisé.');
+      } else if (error.code === 'auth/weak-password') {
+        setLoginError('Le mot de passe est trop court.');
+      } else if (error.code === 'auth/invalid-email') {
+        setLoginError('Format du nom d\'utilisateur invalide.');
+      } else {
+        setLoginError(`Erreur lors de l'inscription: ${error.message}`);
       }
     } finally {
       setIsLoggingIn(false);
@@ -459,7 +502,7 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
           <button 
             onClick={() => setLoginType('google')}
             className={cn(
-              "flex-1 py-2 text-sm font-bold rounded-lg transition-all",
+              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
               loginType === 'google' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
             )}
           >
@@ -468,11 +511,20 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
           <button 
             onClick={() => setLoginType('manual')}
             className={cn(
-              "flex-1 py-2 text-sm font-bold rounded-lg transition-all",
+              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
               loginType === 'manual' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
             )}
           >
-            Identifiants
+            Connexion
+          </button>
+          <button 
+            onClick={() => setLoginType('register')}
+            className={cn(
+              "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+              loginType === 'register' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            S'inscrire
           </button>
         </div>
 
@@ -486,7 +538,7 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
               Se connecter avec Google
             </button>
           </div>
-        ) : (
+        ) : loginType === 'manual' ? (
           <form onSubmit={handleManualLogin} className="space-y-4 text-left">
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-600 ml-1">Nom d'utilisateur</label>
@@ -528,6 +580,59 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
               Se connecter
             </button>
           </form>
+        ) : (
+          <form onSubmit={handleRegister} className="space-y-4 text-left">
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-600 ml-1">Nom complet</label>
+              <input 
+                type="text" 
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Jean Dupont"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-600 ml-1">Nom d'utilisateur (sans espaces)</label>
+              <input 
+                type="text" 
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="jdupont"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe (min. 6 car.)</label>
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all pr-12"
+                  required
+                />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+            <button 
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98] disabled:bg-slate-300"
+            >
+              {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
+              Créer mon compte
+            </button>
+          </form>
         )}
       </motion.div>
     </div>
@@ -549,9 +654,6 @@ export default function App() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
   const [tempTime, setTempTime] = useState('');
-  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
-  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
-  const [newUser, setNewUser] = useState({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -561,7 +663,14 @@ export default function App() {
         const userDocRef = doc(db, 'users', currentUser.uid);
         const unsubProfile = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
-            setProfile({ uid: userDoc.id, ...userDoc.data() } as UserProfile);
+            const profileData = userDoc.data() as UserProfile;
+            if (profileData.suspended) {
+              await signOut(auth);
+              alert("Votre compte a été suspendu. Veuillez contacter l'administrateur.");
+              setLoading(false);
+              return;
+            }
+            setProfile({ uid: userDoc.id, ...profileData });
           } else {
             // Create default profile if it doesn't exist
             const isDefaultAdmin = currentUser.email === 'daniel.shofela01@gmail.com';
@@ -569,7 +678,9 @@ export default function App() {
               uid: currentUser.uid,
               email: currentUser.email || '',
               displayName: currentUser.displayName || 'Anonyme',
-              role: isDefaultAdmin ? 'admin' : 'personnel'
+              role: isDefaultAdmin ? 'admin' : 'personnel',
+              suspended: false,
+              createdAt: Timestamp.now()
             };
             try {
               await setDoc(doc(db, 'users', currentUser.uid), newProfile);
@@ -692,59 +803,6 @@ export default function App() {
     }
   };
 
-  const handleAddUser = async () => {
-    if (!newUser.displayName) return;
-    
-    setLoading(true);
-    try {
-      const cleanUsername = newUser.username?.trim().toLowerCase();
-      let uid = `manual_${Date.now()}`;
-      
-      // If username/password provided, create a real Firebase Auth account
-      if (cleanUsername && newUser.password) {
-        if (newUser.password.length < 6) {
-          throw new Error('Le mot de passe doit contenir au moins 6 caractères.');
-        }
-        const email = `${cleanUsername}@attendance.app`;
-        try {
-          const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, newUser.password);
-          uid = userCredential.user.uid;
-          // Log out the secondary app immediately to be safe
-          await signOut(secondaryAuth);
-        } catch (authError: any) {
-          if (authError.code === 'auth/email-already-in-use') {
-            throw new Error('Ce nom d\'utilisateur est déjà utilisé.');
-          }
-          if (authError.code === 'auth/weak-password') {
-            throw new Error('Le mot de passe est trop court (minimum 6 caractères).');
-          }
-          throw authError;
-        }
-      }
-
-      const userDoc: UserProfile = {
-        uid: uid,
-        displayName: newUser.displayName,
-        role: newUser.role as UserProfile['role'],
-        dailyRate: newUser.dailyRate,
-        username: cleanUsername || undefined,
-      };
-      
-      await setDoc(doc(db, 'users', uid), userDoc);
-      setIsAddUserModalOpen(false);
-      setNewUser({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
-    } catch (error: any) {
-      if (error.code === 'auth/operation-not-allowed') {
-        alert('ERREUR : Vous devez activer "Email/Password" dans la console Firebase (Authentication > Sign-in method) pour créer des comptes avec identifiants.');
-      } else {
-        alert(error.message || 'Erreur lors de la création de l\'utilisateur');
-      }
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSetAbsent = async (userId: string) => {
     if (!profile || (profile.role !== 'admin' && profile.role !== 'superviseur') || !userId || userId === 'undefined') {
       console.error('handleSetAbsent: Missing userId or unauthorized');
@@ -797,7 +855,18 @@ export default function App() {
   }, [roleColor]);
 
   if (loading) return <LoadingScreen />;
-  if (!user) return <LoginScreen onManualLogin={() => {}} />;
+  if (!user) return <LoginScreen />;
+
+  const handleToggleSuspension = async (userId: string, currentStatus: boolean) => {
+    if (!profile || (profile.role !== 'admin' && profile.role !== 'superviseur')) return;
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        suspended: !currentStatus
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`, user);
+    }
+  };
 
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
@@ -1067,16 +1136,6 @@ export default function App() {
                         </h2>
                         <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
                       </div>
-                      <button 
-                        onClick={() => setIsAddUserModalOpen(true)}
-                        className={cn(
-                          "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm",
-                          `bg-${themeColor.primary} text-white hover:opacity-90`
-                        )}
-                      >
-                        <Users className="w-4 h-4" />
-                        Nouveau Membre
-                      </button>
                     </div>
                     {isToday(selectedDate) && (
                       <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `bg-${themeColor.primary} text-white`)}>Aujourd'hui</span>
@@ -1140,6 +1199,11 @@ export default function App() {
                                 )}>
                                   {u.role}
                                 </div>
+                                {u.suspended && (
+                                  <div className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-600 text-white animate-pulse">
+                                    Suspendu
+                                  </div>
+                                )}
                                 {u.role === 'ouvrier' && (
                                   <div className="text-[10px] font-bold text-orange-600">
                                     {workerStats?.[u.uid]?.totalPay.toLocaleString()} F
@@ -1274,6 +1338,19 @@ export default function App() {
                                   <option value="superviseur">Superviseur</option>
                                 </select>
 
+                                <button 
+                                  onClick={() => handleToggleSuspension(u.uid, !!u.suspended)}
+                                  className={cn(
+                                    "p-1 rounded-md transition-all",
+                                    u.suspended 
+                                      ? "bg-green-100 text-green-600 hover:bg-green-200" 
+                                      : "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                                  )}
+                                  title={u.suspended ? "Réactiver" : "Suspendre"}
+                                >
+                                  {u.suspended ? <CheckCircle2 className="w-3 h-3" /> : <Ban className="w-3 h-3" />}
+                                </button>
+
                                 {u.role === 'ouvrier' && (
                                   <div className="flex items-center gap-1">
                                     <span className="text-[9px] font-bold text-slate-400">PAIE:</span>
@@ -1364,125 +1441,6 @@ export default function App() {
             </div>
           </div>
         </main>
-
-        {/* Add User Modal */}
-        <AnimatePresence>
-          {isAddUserModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
-              >
-                <div className={cn("p-6 border-b flex items-center justify-between", `bg-${themeColor.bg}/30 border-${themeColor.primary}/10`)}>
-                  <h3 className="text-xl font-bold flex items-center gap-2">
-                    <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
-                    Nouveau Membre
-                  </h3>
-                  <button onClick={() => setIsAddUserModalOpen(false)} className="p-2 hover:bg-white/50 rounded-full transition-colors">
-                    <XCircle className="w-6 h-6 text-slate-400" />
-                  </button>
-                </div>
-                
-                <div className="p-6 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-600 ml-1">Nom complet</label>
-                    <input 
-                      type="text" 
-                      value={newUser.displayName}
-                      onChange={(e) => setNewUser({ ...newUser, displayName: e.target.value })}
-                      placeholder="Ex: Jean Dupont"
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-600 ml-1">Rôle</label>
-                    <select 
-                      value={newUser.role}
-                      onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserProfile['role'] })}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all bg-white"
-                    >
-                      <option value="ouvrier">Ouvrier</option>
-                      <option value="personnel">Personnel</option>
-                      <option value="stagiaire">Stagiaire</option>
-                      <option value="superviseur">Superviseur</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 ml-1">Nom d'utilisateur</label>
-                      <input 
-                        type="text" 
-                        value={newUser.username}
-                        onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                        placeholder="Optionnel"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe</label>
-                      <div className="relative">
-                        <input 
-                          type={showNewUserPassword ? "text" : "password"} 
-                          value={newUser.password}
-                          onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                          placeholder="Optionnel"
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all pr-10"
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => setShowNewUserPassword(!showNewUserPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                        >
-                          {showNewUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      {newUser.password && newUser.password.length < 6 && (
-                        <p className="text-[10px] text-red-500 font-medium mt-1 ml-1">
-                          Minimum 6 caractères
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {newUser.role === 'ouvrier' && (
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 ml-1">Taux journalier (F)</label>
-                      <input 
-                        type="number" 
-                        value={newUser.dailyRate}
-                        onChange={(e) => setNewUser({ ...newUser, dailyRate: Number(e.target.value) })}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                      />
-                    </div>
-                  )}
-                </div>
-                
-                <div className="p-6 bg-slate-50 border-t flex gap-3">
-                  <button 
-                    onClick={() => setIsAddUserModalOpen(false)}
-                    className="flex-1 px-4 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-all"
-                  >
-                    Annuler
-                  </button>
-                  <button 
-                    onClick={handleAddUser}
-                    disabled={!newUser.displayName}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-xl font-bold text-white transition-all shadow-md",
-                      newUser.displayName ? `bg-${themeColor.primary} hover:opacity-90` : "bg-slate-300 cursor-not-allowed"
-                    )}
-                  >
-                    Enregistrer
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
 
         {/* Consultation Modal */}
         <UserConsultationModal 

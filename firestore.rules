@@ -37,9 +37,14 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isDefaultAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email == "daniel.shofela01@gmail.com";
+    }
+
     function isPrivileged() {
       return isAuthenticated() && (
-        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        isDefaultAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superviseur'])
       );
@@ -47,10 +52,16 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
-        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        isDefaultAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
+    }
+
+    function isSuspended() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('suspended', false) == true;
     }
 
     function isValidUser(data) {
@@ -59,7 +70,8 @@ service cloud.firestore {
              (!('email' in data) || data.email is string) &&
              data.role in ['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] &&
              data.displayName is string &&
-             (!('dailyRate' in data) || data.dailyRate is number);
+             (!('dailyRate' in data) || data.dailyRate is number) &&
+             (!('suspended' in data) || data.suspended is bool);
     }
 
     function isValidAttendance(data) {
@@ -80,45 +92,45 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated() && (
         request.auth.uid == userId || 
-        (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
+        isDefaultAdmin() ||
         (request.auth.uid != userId && isPrivileged())
       );
       
-      // Allow unauthenticated list for manual login (should be restricted in production)
-      allow list: if true;
+      allow list: if isAuthenticated() && (isPrivileged() || isDefaultAdmin());
       
-      // Users can create their own profile, but only as 'personnel' role by default unless they are the default admin
-      // Admins/Supervisors can create ANY user profile (for manual users)
       allow create: if (isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
-                    (request.resource.data.role == 'personnel' || (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true))) ||
-                    (request.auth.uid != userId && isPrivileged() && isValidUser(request.resource.data));
+                    (request.resource.data.role in ['ouvrier', 'personnel', 'stagiaire']) &&
+                    (!('suspended' in request.resource.data) || request.resource.data.suspended == false)) ||
+                    (isDefaultAdmin() && isValidUser(request.resource.data));
       
-      // Only admins can update roles. Supervisors can update dailyRate. Users can update their own displayName.
       allow update: if isAuthenticated() && (
-                    (isOwner(userId) && request.resource.data.role == resource.data.role && 
-                      request.resource.data.dailyRate == resource.data.dailyRate && isValidUser(request.resource.data)) ||
-                    (request.auth.uid != userId && isAdmin() && isValidUser(request.resource.data)) || 
+                    (isOwner(userId) && !isSuspended() && request.resource.data.role == resource.data.role && 
+                      request.resource.data.dailyRate == resource.data.dailyRate && 
+                      request.resource.data.suspended == resource.data.suspended && isValidUser(request.resource.data)) ||
+                    (request.auth.uid != userId && (isAdmin() || isDefaultAdmin()) && isValidUser(request.resource.data)) || 
                     (request.auth.uid != userId && isPrivileged() && request.resource.data.role == resource.data.role && isValidUser(request.resource.data))
                    );
     }
 
     match /attendance/{attendanceId} {
-      allow read: if isAuthenticated() && (
+      allow read: if isAuthenticated() && !isSuspended() && (
         (request.auth.token.email == "daniel.shofela01@gmail.com" && request.auth.token.email_verified == true) ||
         isPrivileged() ||
         resource.data.userId == request.auth.uid
       );
       
       // Privileged users (admin/super) can create/update any attendance
-      allow create: if (isPrivileged() && isValidAttendance(request.resource.data)) ||
-                    (isAuthenticated() && request.resource.data.userId == request.auth.uid && 
-                     isValidAttendance(request.resource.data));
+      allow create: if isAuthenticated() && !isSuspended() && (
+                    (isPrivileged() && isValidAttendance(request.resource.data)) ||
+                    (request.resource.data.userId == request.auth.uid && isValidAttendance(request.resource.data))
+                  );
       
-      allow update: if (isPrivileged() && isValidAttendance(request.resource.data)) ||
-                    (isAuthenticated() && resource.data.userId == request.auth.uid && 
-                     isValidAttendance(request.resource.data));
+      allow update: if isAuthenticated() && !isSuspended() && (
+                    (isPrivileged() && isValidAttendance(request.resource.data)) ||
+                    (resource.data.userId == request.auth.uid && isValidAttendance(request.resource.data))
+                  );
       
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && !isSuspended();
     }
   }
 }
