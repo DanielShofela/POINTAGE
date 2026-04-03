@@ -61,7 +61,9 @@ export type UserRole = 'admin' | 'superviseur' | 'personnel' | 'stagiaire' | 'ou
 
 interface UserProfile {
   uid: string;
-  email: string;
+  email?: string;
+  username?: string;
+  password?: string;
   displayName: string;
   role: UserRole;
   dailyRate?: number; // Pour les ouvriers
@@ -276,7 +278,7 @@ const UserConsultationModal = ({
                 />
                 <div>
                   <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
-                  <p className="text-white/80 text-sm">{userProfile.email} • <span className="capitalize">{userProfile.role}</span></p>
+                  <p className="text-white/80 text-sm">{userProfile.email || 'Sans email'} • <span className="capitalize">{userProfile.role}</span></p>
                 </div>
               </div>
               <button 
@@ -364,12 +366,46 @@ const UserConsultationModal = ({
   );
 };
 
-const LoginScreen = () => {
+const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => void }) => {
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginType, setLoginType] = useState<'google' | 'manual'>('google');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
   const handleLogin = async () => {
+    setLoginError(null);
     try {
       await signInWithPopup(auth, googleProvider);
+    } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') {
+        setLoginError('La fenêtre de connexion a été fermée avant la fin.');
+      } else {
+        setLoginError('Une erreur est survenue lors de la connexion.');
+        console.error('Login failed:', error);
+      }
+    }
+  };
+
+  const handleManualLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username || !password) return;
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const q = query(collection(db, 'users'), where('username', '==', username), where('password', '==', password));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const userData = { uid: snapshot.docs[0].id, ...snapshot.docs[0].data() } as UserProfile;
+        onManualLogin(userData);
+      } else {
+        setLoginError('Nom d\'utilisateur ou mot de passe incorrect.');
+      }
     } catch (error) {
-      console.error('Login failed:', error);
+      setLoginError('Erreur lors de la connexion.');
+      console.error(error);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -385,13 +421,76 @@ const LoginScreen = () => {
         </div>
         <h1 className="text-3xl font-bold text-slate-900 mb-2">Suivi de Présence</h1>
         <p className="text-slate-500 mb-8">Connectez-vous pour gérer ou consulter vos relevés de présence.</p>
-        <button 
-          onClick={handleLogin}
-          className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98]"
-        >
-          <LogIn className="w-5 h-5" />
-          Se connecter avec Google
-        </button>
+        
+        {loginError && (
+          <div className="mb-6 p-4 bg-red-50 text-red-600 text-sm font-medium rounded-2xl border border-red-100">
+            {loginError}
+          </div>
+        )}
+
+        <div className="flex p-1 bg-slate-100 rounded-xl mb-6">
+          <button 
+            onClick={() => setLoginType('google')}
+            className={cn(
+              "flex-1 py-2 text-sm font-bold rounded-lg transition-all",
+              loginType === 'google' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            Google
+          </button>
+          <button 
+            onClick={() => setLoginType('manual')}
+            className={cn(
+              "flex-1 py-2 text-sm font-bold rounded-lg transition-all",
+              loginType === 'manual' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            Identifiants
+          </button>
+        </div>
+
+        {loginType === 'google' ? (
+          <button 
+            onClick={handleLogin}
+            className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98]"
+          >
+            <LogIn className="w-5 h-5" />
+            Se connecter avec Google
+          </button>
+        ) : (
+          <form onSubmit={handleManualLogin} className="space-y-4 text-left">
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-600 ml-1">Nom d'utilisateur</label>
+              <input 
+                type="text" 
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                placeholder="Votre nom d'utilisateur"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe</label>
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                placeholder="Votre mot de passe"
+                required
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all hover:shadow-lg hover:shadow-emerald-200 active:scale-[0.98] disabled:bg-slate-300"
+            >
+              {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
+              Se connecter
+            </button>
+          </form>
+        )}
       </motion.div>
     </div>
   );
@@ -400,9 +499,10 @@ const LoginScreen = () => {
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [manualUser, setManualUser] = useState<UserProfile | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -412,11 +512,23 @@ export default function App() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
   const [tempTime, setTempTime] = useState('');
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUser, setNewUser] = useState({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
 
   useEffect(() => {
+    // Check for manual session first
+    const savedManualUser = localStorage.getItem('manualUser');
+    if (savedManualUser) {
+      const parsed = JSON.parse(savedManualUser);
+      setManualUser(parsed);
+      setUser(parsed);
+      setProfile(parsed);
+      setLoading(false);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
+        setUser(currentUser);
         // Listen to the user's profile in real-time
         const userDocRef = doc(db, 'users', currentUser.uid);
         const unsubProfile = onSnapshot(userDocRef, async (userDoc) => {
@@ -445,7 +557,8 @@ export default function App() {
         });
 
         return () => unsubProfile();
-      } else {
+      } else if (!savedManualUser) {
+        setUser(null);
         setProfile(null);
         setLoading(false);
       }
@@ -551,6 +664,26 @@ export default function App() {
     }
   };
 
+  const handleAddUser = async () => {
+    if (!newUser.displayName) return;
+    const manualUid = `manual_${Date.now()}`;
+    const userDoc: UserProfile = {
+      uid: manualUid,
+      displayName: newUser.displayName,
+      role: newUser.role as UserProfile['role'],
+      dailyRate: newUser.dailyRate,
+      username: newUser.username || undefined,
+      password: newUser.password || undefined
+    };
+    try {
+      await setDoc(doc(db, 'users', manualUid), userDoc);
+      setIsAddUserModalOpen(false);
+      setNewUser({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${manualUid}`);
+    }
+  };
+
   const handleSetAbsent = async (userId: string) => {
     if (!profile || (profile.role !== 'admin' && profile.role !== 'superviseur') || !userId || userId === 'undefined') {
       console.error('handleSetAbsent: Missing userId or unauthorized');
@@ -581,7 +714,13 @@ export default function App() {
     }
   };
 
-  const logout = () => signOut(auth);
+  const logout = () => {
+    signOut(auth);
+    setManualUser(null);
+    localStorage.removeItem('manualUser');
+    setUser(null);
+    setProfile(null);
+  };
 
   const todayRecord = useMemo(() => {
     if (!user) return null;
@@ -599,7 +738,12 @@ export default function App() {
   }, [roleColor]);
 
   if (loading) return <LoadingScreen />;
-  if (!user) return <LoginScreen />;
+  if (!user) return <LoginScreen onManualLogin={(userData) => {
+    setManualUser(userData);
+    setUser(userData);
+    setProfile(userData);
+    localStorage.setItem('manualUser', JSON.stringify(userData));
+  }} />;
 
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
@@ -861,12 +1005,24 @@ export default function App() {
               {isAdminOrSuper ? (
                 <div className={cn("bg-white rounded-3xl shadow-xl border overflow-hidden transition-all duration-500", `border-${themeColor.primary}/20 shadow-${themeColor.primary}/5`)}>
                   <div className={cn("p-6 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4", `border-${themeColor.primary}/10`, `bg-${themeColor.bg}/20`)}>
-                    <div>
-                      <h2 className="text-xl font-bold flex items-center gap-2">
-                        <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
-                        Marquer la présence
-                      </h2>
-                      <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                      <div>
+                        <h2 className="text-xl font-bold flex items-center gap-2">
+                          <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
+                          Marquer la présence
+                        </h2>
+                        <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
+                      </div>
+                      <button 
+                        onClick={() => setIsAddUserModalOpen(true)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm",
+                          `bg-${themeColor.primary} text-white hover:opacity-90`
+                        )}
+                      >
+                        <Users className="w-4 h-4" />
+                        Nouveau Membre
+                      </button>
                     </div>
                     {isToday(selectedDate) && (
                       <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `bg-${themeColor.primary} text-white`)}>Aujourd'hui</span>
@@ -916,7 +1072,7 @@ export default function App() {
                                   <UserIcon className="w-3.5 h-3.5" />
                                 </button>
                               </div>
-                              <div className="text-xs text-slate-400">{u.email}</div>
+                              <div className="text-xs text-slate-400">{u.email || 'Sans email'}</div>
                               <div className="flex items-center gap-2 mt-1">
                                 <div className={cn(
                                   "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
@@ -1154,6 +1310,111 @@ export default function App() {
             </div>
           </div>
         </main>
+
+        {/* Add User Modal */}
+        <AnimatePresence>
+          {isAddUserModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+              >
+                <div className={cn("p-6 border-b flex items-center justify-between", `bg-${themeColor.bg}/30 border-${themeColor.primary}/10`)}>
+                  <h3 className="text-xl font-bold flex items-center gap-2">
+                    <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
+                    Nouveau Membre
+                  </h3>
+                  <button onClick={() => setIsAddUserModalOpen(false)} className="p-2 hover:bg-white/50 rounded-full transition-colors">
+                    <XCircle className="w-6 h-6 text-slate-400" />
+                  </button>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-600 ml-1">Nom complet</label>
+                    <input 
+                      type="text" 
+                      value={newUser.displayName}
+                      onChange={(e) => setNewUser({ ...newUser, displayName: e.target.value })}
+                      placeholder="Ex: Jean Dupont"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-600 ml-1">Rôle</label>
+                    <select 
+                      value={newUser.role}
+                      onChange={(e) => setNewUser({ ...newUser, role: e.target.value as UserProfile['role'] })}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all bg-white"
+                    >
+                      <option value="ouvrier">Ouvrier</option>
+                      <option value="personnel">Personnel</option>
+                      <option value="stagiaire">Stagiaire</option>
+                      <option value="superviseur">Superviseur</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-bold text-slate-600 ml-1">Nom d'utilisateur</label>
+                      <input 
+                        type="text" 
+                        value={newUser.username}
+                        onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                        placeholder="Optionnel"
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-bold text-slate-600 ml-1">Mot de passe</label>
+                      <input 
+                        type="password" 
+                        value={newUser.password}
+                        onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                        placeholder="Optionnel"
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {newUser.role === 'ouvrier' && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-bold text-slate-600 ml-1">Taux journalier (F)</label>
+                      <input 
+                        type="number" 
+                        value={newUser.dailyRate}
+                        onChange={(e) => setNewUser({ ...newUser, dailyRate: Number(e.target.value) })}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="p-6 bg-slate-50 border-t flex gap-3">
+                  <button 
+                    onClick={() => setIsAddUserModalOpen(false)}
+                    className="flex-1 px-4 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-all"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    onClick={handleAddUser}
+                    disabled={!newUser.displayName}
+                    className={cn(
+                      "flex-1 px-4 py-3 rounded-xl font-bold text-white transition-all shadow-md",
+                      newUser.displayName ? `bg-${themeColor.primary} hover:opacity-90` : "bg-slate-300 cursor-not-allowed"
+                    )}
+                  >
+                    Enregistrer
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Consultation Modal */}
         <UserConsultationModal 

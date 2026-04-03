@@ -54,11 +54,11 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role']) &&
+      return data.keys().hasAll(['uid', 'role', 'displayName']) &&
              data.uid is string &&
-             data.email is string &&
+             (!('email' in data) || data.email is string) &&
              data.role in ['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] &&
-             (!('displayName' in data) || data.displayName is string) &&
+             data.displayName is string &&
              (!('dailyRate' in data) || data.dailyRate is number);
     }
 
@@ -78,11 +78,16 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isPrivileged());
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isPrivileged());
+      
+      // Allow unauthenticated list for manual login (should be restricted in production)
+      allow list: if true;
       
       // Users can create their own profile, but only as 'personnel' role by default unless they are the default admin
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
-                    (request.resource.data.role == 'personnel' || isAdmin());
+      // Admins/Supervisors can create ANY user profile (for manual users)
+      allow create: if (isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
+                    (request.resource.data.role == 'personnel' || isAdmin())) ||
+                    (isPrivileged() && isValidUser(request.resource.data));
       
       // Only admins can update roles. Supervisors can update dailyRate. Users can update their own displayName.
       allow update: if isAuthenticated() && 
