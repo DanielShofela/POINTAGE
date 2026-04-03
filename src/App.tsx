@@ -394,15 +394,34 @@ const LoginScreen = ({ onManualLogin }: { onManualLogin: (user: UserProfile) => 
 
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) return;
+    const cleanUsername = username.trim().toLowerCase();
+    if (!cleanUsername || !password) return;
     setIsLoggingIn(true);
     setLoginError(null);
     try {
-      const email = `${username}@attendance.app`;
+      const email = `${cleanUsername}@attendance.app`;
       await signInWithEmailAndPassword(auth, email, password);
       // onAuthStateChanged will handle the rest
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+      // Check if it's a legacy user (created before Auth integration)
+      try {
+        const q = query(collection(db, 'users'), where('username', '==', cleanUsername));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const userData = snapshot.docs[0].data() as UserProfile;
+          if (userData.uid.startsWith('manual_')) {
+            setLoginError("Ce compte a été créé avec l'ancien système. Veuillez demander à l'administrateur de supprimer et recréer votre compte.");
+            setIsLoggingIn(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error checking legacy user:', e);
+      }
+
+      if (error.code === 'auth/operation-not-allowed') {
+        setLoginError('La connexion par identifiants n\'est pas activée dans la console Firebase. Contactez l\'administrateur.');
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError('Nom d\'utilisateur ou mot de passe incorrect.');
       } else {
         setLoginError('Erreur lors de la connexion.');
@@ -662,11 +681,12 @@ export default function App() {
     
     setLoading(true);
     try {
+      const cleanUsername = newUser.username?.trim().toLowerCase();
       let uid = `manual_${Date.now()}`;
       
       // If username/password provided, create a real Firebase Auth account
-      if (newUser.username && newUser.password) {
-        const email = `${newUser.username}@attendance.app`;
+      if (cleanUsername && newUser.password) {
+        const email = `${cleanUsername}@attendance.app`;
         try {
           const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, newUser.password);
           uid = userCredential.user.uid;
@@ -685,16 +705,18 @@ export default function App() {
         displayName: newUser.displayName,
         role: newUser.role as UserProfile['role'],
         dailyRate: newUser.dailyRate,
-        username: newUser.username || undefined,
-        // We don't store the password in the document anymore for security, 
-        // Firebase Auth handles it.
+        username: cleanUsername || undefined,
       };
       
       await setDoc(doc(db, 'users', uid), userDoc);
       setIsAddUserModalOpen(false);
       setNewUser({ displayName: '', role: 'ouvrier', dailyRate: 0, username: '', password: '' });
     } catch (error: any) {
-      alert(error.message || 'Erreur lors de la création de l\'utilisateur');
+      if (error.code === 'auth/operation-not-allowed') {
+        alert('ERREUR : Vous devez activer "Email/Password" dans la console Firebase (Authentication > Sign-in method) pour créer des comptes avec identifiants.');
+      } else {
+        alert(error.message || 'Erreur lors de la création de l\'utilisateur');
+      }
       console.error(error);
     } finally {
       setLoading(false);
