@@ -1,0 +1,23 @@
+{
+  "name": "Suivi de Présence",
+  "short_name": "Présence",
+  "description": "Application de gestion et suivi de présence",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "https://api.dicebear.com/7.x/initials/svg?seed=SP&backgroundColor=10b981&fontFamily=Arial&fontWeight=bold",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "https://api.dicebear.com/7.x/initials/svg?seed=SP&backgroundColor=10b981&fontFamily=Arial&fontWeight=bold",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
