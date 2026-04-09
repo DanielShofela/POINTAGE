@@ -71,7 +71,8 @@ service cloud.firestore {
              data.role in ['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] &&
              data.displayName is string &&
              (!('dailyRate' in data) || data.dailyRate is number) &&
-             (!('suspended' in data) || data.suspended is bool);
+             (!('suspended' in data) || data.suspended is bool) &&
+             (!('photoURL' in data) || data.photoURL is string);
     }
 
     function isValidAttendance(data) {
@@ -105,8 +106,9 @@ service cloud.firestore {
       
       allow update: if isAuthenticated() && (
                     (isOwner(userId) && !isSuspended() && request.resource.data.role == resource.data.role && 
-                      request.resource.data.dailyRate == resource.data.dailyRate && 
-                      request.resource.data.suspended == resource.data.suspended && isValidUser(request.resource.data)) ||
+                      request.resource.data.get('dailyRate', null) == resource.data.get('dailyRate', null) && 
+                      request.resource.data.get('suspended', false) == resource.data.get('suspended', false) && 
+                      isValidUser(request.resource.data)) ||
                     (request.auth.uid != userId && (isAdmin() || isDefaultAdmin()) && isValidUser(request.resource.data)) || 
                     (request.auth.uid != userId && isPrivileged() && request.resource.data.role == resource.data.role && isValidUser(request.resource.data))
                    );

@@ -12,6 +12,7 @@ import {
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
+  updateProfile,
   collection, 
   doc, 
   getDoc, 
@@ -24,6 +25,10 @@ import {
   serverTimestamp, 
   addDoc,
   updateDoc,
+  storage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
   OperationType,
   handleFirestoreError,
   User
@@ -50,7 +55,10 @@ import {
   Eye,
   EyeOff,
   UserPlus,
-  Ban
+  Ban,
+  Camera,
+  Upload,
+  Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isToday, parseISO, subDays, isBefore, startOfDay } from 'date-fns';
@@ -76,6 +84,7 @@ interface UserProfile {
   dailyRate?: number; // Pour les ouvriers
   suspended?: boolean;
   createdAt?: Timestamp;
+  photoURL?: string;
 }
 
 const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string, ring: string, border: string }> = {
@@ -244,6 +253,154 @@ const StatsCard = ({ title, records, periodLabel, color }: { title: string, reco
   );
 };
 
+const ProfileModal = ({ 
+  isOpen, 
+  onClose, 
+  profile, 
+  user,
+  themeColor 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  profile: UserProfile | null, 
+  user: User | null,
+  themeColor: any 
+}) => {
+  const [displayName, setDisplayName] = useState(profile?.displayName || '');
+  const [photoURL, setPhotoURL] = useState(profile?.photoURL || user?.photoURL || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (profile) {
+      setDisplayName(profile.displayName);
+      setPhotoURL(profile.photoURL || user?.photoURL || '');
+    }
+  }, [profile, user]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !profile) return;
+    
+    setIsSaving(true);
+    setError(null);
+    
+    try {
+      // Update Auth Profile
+      await updateProfile(user, {
+        displayName: displayName,
+        photoURL: photoURL
+      });
+      
+      // Update Firestore Profile
+      await updateDoc(doc(db, 'users', user.uid), {
+        displayName: displayName,
+        photoURL: photoURL
+      });
+      
+      onClose();
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
+      setError("Une erreur est survenue lors de la mise à jour du profil.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100"
+          >
+            <div className={cn("p-8 text-center relative", `bg-${themeColor.bg}`)}>
+              <button 
+                onClick={onClose}
+                className="absolute top-6 right-6 p-2 hover:bg-white/50 rounded-full transition-colors"
+              >
+                <XCircle className="w-6 h-6 text-slate-400" />
+              </button>
+              
+              <div className="relative inline-block mb-4">
+                <img 
+                  src={photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`} 
+                  alt="Avatar" 
+                  className={cn("w-24 h-24 rounded-full border-4 shadow-lg", `border-${themeColor.primary}/20`)}
+                  referrerPolicy="no-referrer"
+                />
+                <div className={cn("absolute -bottom-1 -right-1 p-2 rounded-full shadow-md", `bg-${themeColor.primary} text-white`)}>
+                  <UserIcon className="w-4 h-4" />
+                </div>
+              </div>
+              
+              <h2 className="text-2xl font-black text-slate-800">Mon Profil</h2>
+              <p className="text-slate-500 text-sm">Personnalisez votre identité sur la plateforme</p>
+            </div>
+
+            <form onSubmit={handleSave} className="p-8 space-y-6">
+              {error && (
+                <div className="p-4 bg-red-50 text-red-600 text-sm font-medium rounded-2xl border border-red-100">
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Nom d'affichage</label>
+                <input 
+                  type="text" 
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all bg-slate-50/50"
+                  placeholder="Votre nom"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">URL de la photo</label>
+                <input 
+                  type="url" 
+                  value={photoURL}
+                  onChange={(e) => setPhotoURL(e.target.value)}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all bg-slate-50/50"
+                  placeholder="https://exemple.com/photo.jpg"
+                />
+                <p className="text-[10px] text-slate-400 ml-1">Laissez vide pour utiliser un avatar généré automatiquement.</p>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button 
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-4 rounded-2xl font-bold text-slate-500 hover:bg-slate-50 transition-all"
+                >
+                  Annuler
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isSaving}
+                  className={cn(
+                    "flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
+                    `bg-${themeColor.primary} hover:shadow-${themeColor.primary}/30 shadow-${themeColor.primary}/20`,
+                    isSaving && "opacity-70 cursor-not-allowed"
+                  )}
+                >
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                  Enregistrer
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 const UserConsultationModal = ({ 
   isOpen, 
   onClose, 
@@ -281,9 +438,9 @@ const UserConsultationModal = ({
             <div className={cn("p-6 border-b flex items-center justify-between text-white", `bg-${uColor.primary}`)}>
               <div className="flex items-center gap-4">
                 <img 
-                  src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
+                  src={userProfile.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
                   alt={userProfile.displayName} 
-                  className="w-12 h-12 rounded-2xl bg-white/20"
+                  className="w-12 h-12 rounded-2xl bg-white/20 object-cover"
                 />
                 <div>
                   <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
@@ -651,7 +808,9 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
   const [tempTime, setTempTime] = useState('');
 
@@ -680,7 +839,8 @@ export default function App() {
               displayName: currentUser.displayName || 'Anonyme',
               role: isDefaultAdmin ? 'admin' : 'personnel',
               suspended: false,
-              createdAt: Timestamp.now()
+              createdAt: Timestamp.now(),
+              photoURL: currentUser.photoURL || ''
             };
             try {
               await setDoc(doc(db, 'users', currentUser.uid), newProfile);
@@ -917,7 +1077,10 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-sm">
+              <div 
+                className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={() => setIsProfileModalOpen(true)}
+              >
                 <div className="hidden sm:flex flex-col items-end">
                   <span className={cn("font-semibold", profile?.role === 'admin' ? "text-white" : "text-slate-700")}>{profile?.displayName}</span>
                   <span className={cn(
@@ -933,7 +1096,7 @@ export default function App() {
                   </span>
                 </div>
                 <img 
-                  src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
+                  src={profile?.photoURL || user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
                   alt="Avatar" 
                   className={cn(
                     "w-10 h-10 rounded-full border-2",
@@ -1142,237 +1305,267 @@ export default function App() {
                     )}
                   </div>
 
+                  <div className="px-6 py-3 bg-slate-50/50 border-b flex flex-wrap gap-2 items-center">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mr-2 flex items-center gap-1">
+                      <Filter className="w-3 h-3" />
+                      Filtrer :
+                    </div>
+                    <button 
+                      onClick={() => setRoleFilter('all')}
+                      className={cn(
+                        "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
+                        roleFilter === 'all' ? `bg-${themeColor.primary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
+                      )}
+                    >
+                      Tous
+                    </button>
+                    {(['superviseur', 'personnel', 'stagiaire', 'ouvrier'] as UserRole[]).map(role => (
+                      <button 
+                        key={role}
+                        onClick={() => setRoleFilter(role)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
+                          roleFilter === role ? `bg-${ROLE_COLORS[role].primary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
+                        )}
+                      >
+                        {role}s
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="divide-y divide-slate-100">
-                    {allUsers.filter(u => u.role !== 'admin').map((u, index) => {
-                      const record = attendance.find(r => r.userId === u.uid && r.date === format(selectedDate, 'yyyy-MM-dd'));
-                      const uColor = ROLE_COLORS[u.role] || ROLE_COLORS.personnel;
-                      
-                      return (
-                        <div key={u.uid || `user-${index}`} className={cn(
-                          "p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors",
-                          record?.status === 'present' ? "bg-green-50/30 hover:bg-green-50/50" : "bg-red-50/30 hover:bg-red-50/50",
-                          !record && "bg-white hover:bg-slate-50/50"
-                        )}>
-                          <div className="flex items-center gap-4">
-                            <button 
-                              onClick={() => {
-                                setSelectedUserForConsult(u);
-                                setIsConsultModalOpen(true);
-                              }}
-                              className="relative group"
-                              title="Consulter le profil"
-                            >
-                              <img 
-                                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} 
-                                alt={u.displayName} 
-                                className={cn("w-12 h-12 rounded-2xl bg-slate-100 group-hover:ring-2 transition-all", `group-hover:ring-${uColor.primary}/40`)}
-                              />
-                              <div className={cn("absolute inset-0 flex items-center justify-center rounded-2xl transition-all", `bg-${uColor.primary}/0 group-hover:bg-${uColor.primary}/20`)}>
-                                <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-all" />
-                              </div>
-                            </button>
-                            <div>
-                              <div className="font-bold text-slate-800 flex items-center gap-2">
-                                {u.displayName}
-                                <button 
-                                  onClick={() => {
-                                    setSelectedUserForConsult(u);
-                                    setIsConsultModalOpen(true);
-                                  }}
-                                  className={cn("p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-400", `hover:text-${uColor.primary}`)}
-                                  title="Consulter le profil"
-                                >
-                                  <UserIcon className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                              <div className="text-xs text-slate-400">{u.email || 'Sans email'}</div>
-                              <div className="flex items-center gap-2 mt-1">
-                                <div className={cn(
-                                  "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
-                                  record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                                )}>
-                                  {record?.status === 'present' ? 'Présent' : 'Absent'}
+                    {allUsers
+                      .filter(u => u.role !== 'admin' && (roleFilter === 'all' || u.role === roleFilter))
+                      .map((u, index) => {
+                        const record = attendance.find(r => r.userId === u.uid && r.date === format(selectedDate, 'yyyy-MM-dd'));
+                        const uColor = ROLE_COLORS[u.role] || ROLE_COLORS.personnel;
+                        
+                        return (
+                          <div key={u.uid || `user-${index}`} className={cn(
+                            "p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-colors",
+                            record?.status === 'present' ? "bg-green-50/30 hover:bg-green-50/50" : "bg-red-50/30 hover:bg-red-50/50",
+                            !record && "bg-white hover:bg-slate-50/50"
+                          )}>
+                            <div className="flex items-center gap-4">
+                              <button 
+                                onClick={() => {
+                                  setSelectedUserForConsult(u);
+                                  setIsConsultModalOpen(true);
+                                }}
+                                className="relative group"
+                                title="Consulter le profil"
+                              >
+                                <img 
+                                  src={u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} 
+                                  alt={u.displayName} 
+                                  className={cn("w-12 h-12 rounded-2xl bg-slate-100 group-hover:ring-2 transition-all", `group-hover:ring-${uColor.primary}/40`)}
+                                />
+                                <div className={cn("absolute inset-0 flex items-center justify-center rounded-2xl transition-all", `bg-${uColor.primary}/0 group-hover:bg-${uColor.primary}/20`)}>
+                                  <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-all" />
                                 </div>
-                                <div className={cn(
-                                  "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
-                                  `bg-${uColor.bg} text-${uColor.text}`
-                                )}>
-                                  {u.role}
-                                </div>
-                                {u.suspended && (
-                                  <div className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-600 text-white animate-pulse">
-                                    Suspendu
-                                  </div>
-                                )}
-                                {u.role === 'ouvrier' && (
-                                  <div className="text-[10px] font-bold text-orange-600">
-                                    {workerStats?.[u.uid]?.totalPay.toLocaleString()} F
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col gap-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="flex items-center gap-1">
-                                {editingTime?.userId === u.uid && editingTime?.type === 'checkIn' ? (
-                                  <div className="flex items-center gap-1">
-                                    <input 
-                                      type="time" 
-                                      value={tempTime}
-                                      onChange={(e) => setTempTime(e.target.value)}
-                                      className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
-                                    />
-                                    <button 
-                                      onClick={() => {
-                                        handleSetTime(u.uid, 'checkIn', tempTime);
-                                        setEditingTime(null);
-                                      }}
-                                      className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200"
-                                    >
-                                      <CheckCircle2 className="w-3 h-3" />
-                                    </button>
-                                    <button 
-                                      onClick={() => setEditingTime(null)}
-                                      className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
-                                    >
-                                      <XCircle className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ) : (
+                              </button>
+                              <div>
+                                <div className="font-bold text-slate-800 flex items-center gap-2">
+                                  {u.displayName}
                                   <button 
                                     onClick={() => {
-                                      if (record?.checkIn) {
-                                        setEditingTime({ userId: u.uid, type: 'checkIn' });
-                                        setTempTime(format(record.checkIn.toDate(), 'HH:mm'));
-                                      } else {
-                                        handleSetTime(u.uid, 'checkIn');
-                                      }
+                                      setSelectedUserForConsult(u);
+                                      setIsConsultModalOpen(true);
                                     }}
-                                    className={cn(
-                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                                      record?.checkIn 
-                                        ? `bg-${uColor.bg} text-${uColor.text} hover:bg-${uColor.ring}` 
-                                        : "bg-slate-50 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
-                                    )}
+                                    className={cn("p-1 hover:bg-slate-200 rounded-md transition-colors text-slate-400", `hover:text-${uColor.primary}`)}
+                                    title="Consulter le profil"
                                   >
-                                    <Clock className="w-3 h-3" />
-                                    {record?.checkIn ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
+                                    <UserIcon className="w-3.5 h-3.5" />
                                   </button>
-                                )}
-
-                                {editingTime?.userId === u.uid && editingTime?.type === 'checkOut' ? (
-                                  <div className="flex items-center gap-1">
-                                    <input 
-                                      type="time" 
-                                      value={tempTime}
-                                      onChange={(e) => setTempTime(e.target.value)}
-                                      className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
-                                    />
-                                    <button 
-                                      onClick={() => {
-                                        handleSetTime(u.uid, 'checkOut', tempTime);
-                                        setEditingTime(null);
-                                      }}
-                                      className="p-1 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
-                                    >
-                                      <CheckCircle2 className="w-3 h-3" />
-                                    </button>
-                                    <button 
-                                      onClick={() => setEditingTime(null)}
-                                      className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
-                                    >
-                                      <XCircle className="w-3 h-3" />
-                                    </button>
+                                </div>
+                                <div className="text-xs text-slate-400">{u.email || 'Sans email'}</div>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <div className={cn(
+                                    "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
+                                    record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                  )}>
+                                    {record?.status === 'present' ? 'Présent' : 'Absent'}
                                   </div>
-                                ) : (
-                                  <button 
-                                    onClick={() => {
-                                      if (record?.checkOut) {
-                                        setEditingTime({ userId: u.uid, type: 'checkOut' });
-                                        setTempTime(format(record.checkOut.toDate(), 'HH:mm'));
-                                      } else {
-                                        handleSetTime(u.uid, 'checkOut');
-                                      }
-                                    }}
-                                    className={cn(
-                                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                                      record?.checkOut 
-                                        ? "bg-slate-100 text-slate-700 hover:bg-slate-200" 
-                                        : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
-                                    )}
-                                  >
-                                    <Clock className="w-3 h-3" />
-                                    {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
-                                  </button>
-                                )}
-                                
-                                <button 
-                                  onClick={() => handleSetAbsent(u.uid)}
-                                  className={cn(
-                                    "p-1.5 rounded-lg transition-all",
-                                    record?.status === 'absent' && !record?.checkIn && !record?.checkOut
-                                      ? "bg-red-100 text-red-600"
-                                      : "bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                  <div className={cn(
+                                    "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
+                                    `bg-${uColor.bg} text-${uColor.text}`
+                                  )}>
+                                    {u.role}
+                                  </div>
+                                  {u.suspended && (
+                                    <div className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-600 text-white animate-pulse">
+                                      Suspendu
+                                    </div>
                                   )}
-                                  title="Marquer absent"
-                                >
-                                  <XCircle className="w-4 h-4" />
-                                </button>
+                                  {u.role === 'ouvrier' && (
+                                    <div className="text-[10px] font-bold text-orange-600">
+                                      {workerStats?.[u.uid]?.totalPay.toLocaleString()} F
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
-                            {/* Admin & Superviseur: Role & Rate management */}
-                            {isAdminOrSuper && (
-                              <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
-                                <select 
-                                  value={u.role}
-                                  disabled={profile.role !== 'admin'} // Only admin can change roles
-                                  onChange={(e) => handleUpdateRole(u.uid, e.target.value as UserRole)}
-                                  className="text-[9px] font-bold uppercase tracking-wider bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
-                                >
-                                  <option value="personnel">Personnel</option>
-                                  <option value="stagiaire">Stagiaire</option>
-                                  <option value="ouvrier">Ouvrier</option>
-                                  <option value="superviseur">Superviseur</option>
-                                </select>
-
-                                <button 
-                                  onClick={() => handleToggleSuspension(u.uid, !!u.suspended)}
-                                  className={cn(
-                                    "p-1 rounded-md transition-all",
-                                    u.suspended 
-                                      ? "bg-green-100 text-green-600 hover:bg-green-200" 
-                                      : "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                            <div className="flex flex-col gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  {editingTime?.userId === u.uid && editingTime?.type === 'checkIn' ? (
+                                    <div className="flex items-center gap-1">
+                                      <input 
+                                        type="time" 
+                                        value={tempTime}
+                                        onChange={(e) => setTempTime(e.target.value)}
+                                        className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
+                                      />
+                                      <button 
+                                        onClick={() => {
+                                          handleSetTime(u.uid, 'checkIn', tempTime);
+                                          setEditingTime(null);
+                                        }}
+                                        className="p-1 bg-emerald-100 text-emerald-600 rounded hover:bg-emerald-200"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3" />
+                                      </button>
+                                      <button 
+                                        onClick={() => setEditingTime(null)}
+                                        className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
+                                      >
+                                        <XCircle className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button 
+                                      onClick={() => {
+                                        if (record?.checkIn) {
+                                          setEditingTime({ userId: u.uid, type: 'checkIn' });
+                                          setTempTime(format(record.checkIn.toDate(), 'HH:mm'));
+                                        } else {
+                                          handleSetTime(u.uid, 'checkIn');
+                                        }
+                                      }}
+                                      className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                        record?.checkIn 
+                                          ? `bg-${uColor.bg} text-${uColor.text} hover:bg-${uColor.ring}` 
+                                          : "bg-slate-50 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
+                                      )}
+                                    >
+                                      <Clock className="w-3 h-3" />
+                                      {record?.checkIn ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
+                                    </button>
                                   )}
-                                  title={u.suspended ? "Réactiver" : "Suspendre"}
-                                >
-                                  {u.suspended ? <CheckCircle2 className="w-3 h-3" /> : <Ban className="w-3 h-3" />}
-                                </button>
 
-                                {u.role === 'ouvrier' && (
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[9px] font-bold text-slate-400">PAIE:</span>
-                                    <input 
-                                      type="number"
-                                      value={u.dailyRate || ''}
-                                      onChange={(e) => handleUpdateDailyRate(u.uid, parseInt(e.target.value) || 0)}
-                                      placeholder="Taux"
-                                      className="w-16 text-[9px] font-bold bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-orange-500"
-                                    />
-                                  </div>
-                                )}
+                                  {editingTime?.userId === u.uid && editingTime?.type === 'checkOut' ? (
+                                    <div className="flex items-center gap-1">
+                                      <input 
+                                        type="time" 
+                                        value={tempTime}
+                                        onChange={(e) => setTempTime(e.target.value)}
+                                        className="text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-0.5"
+                                      />
+                                      <button 
+                                        onClick={() => {
+                                          handleSetTime(u.uid, 'checkOut', tempTime);
+                                          setEditingTime(null);
+                                        }}
+                                        className="p-1 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
+                                      >
+                                        <CheckCircle2 className="w-3 h-3" />
+                                      </button>
+                                      <button 
+                                        onClick={() => setEditingTime(null)}
+                                        className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
+                                      >
+                                        <XCircle className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button 
+                                      onClick={() => {
+                                        if (record?.checkOut) {
+                                          setEditingTime({ userId: u.uid, type: 'checkOut' });
+                                          setTempTime(format(record.checkOut.toDate(), 'HH:mm'));
+                                        } else {
+                                          handleSetTime(u.uid, 'checkOut');
+                                        }
+                                      }}
+                                      className={cn(
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                                        record?.checkOut 
+                                          ? "bg-slate-100 text-slate-700 hover:bg-slate-200" 
+                                          : "bg-slate-50 text-slate-400 hover:bg-slate-200 hover:text-slate-800"
+                                      )}
+                                    >
+                                      <Clock className="w-3 h-3" />
+                                      {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
+                                    </button>
+                                  )}
+                                  
+                                  <button 
+                                    onClick={() => handleSetAbsent(u.uid)}
+                                    className={cn(
+                                      "p-1.5 rounded-lg transition-all",
+                                      record?.status === 'absent' && !record?.checkIn && !record?.checkOut
+                                        ? "bg-red-100 text-red-600"
+                                        : "bg-slate-50 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                    )}
+                                    title="Marquer absent"
+                                  >
+                                    <XCircle className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
-                            )}
+
+                              {/* Admin & Superviseur: Role & Rate management */}
+                              {isAdminOrSuper && (
+                                <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
+                                  <select 
+                                    value={u.role}
+                                    disabled={profile.role !== 'admin'} // Only admin can change roles
+                                    onChange={(e) => handleUpdateRole(u.uid, e.target.value as UserRole)}
+                                    className="text-[9px] font-bold uppercase tracking-wider bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                                  >
+                                    <option value="personnel">Personnel</option>
+                                    <option value="stagiaire">Stagiaire</option>
+                                    <option value="ouvrier">Ouvrier</option>
+                                    <option value="superviseur">Superviseur</option>
+                                  </select>
+
+                                  <button 
+                                    onClick={() => handleToggleSuspension(u.uid, !!u.suspended)}
+                                    className={cn(
+                                      "p-1 rounded-md transition-all",
+                                      u.suspended 
+                                        ? "bg-green-100 text-green-600 hover:bg-green-200" 
+                                        : "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                                    )}
+                                    title={u.suspended ? "Réactiver" : "Suspendre"}
+                                  >
+                                    {u.suspended ? <CheckCircle2 className="w-3 h-3" /> : <Ban className="w-3 h-3" />}
+                                  </button>
+
+                                  {u.role === 'ouvrier' && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] font-bold text-slate-400">PAIE:</span>
+                                      <input 
+                                        type="number"
+                                        value={u.dailyRate || ''}
+                                        onChange={(e) => handleUpdateDailyRate(u.uid, parseInt(e.target.value) || 0)}
+                                        placeholder="Taux"
+                                        className="w-16 text-[9px] font-bold bg-slate-50 border-none rounded-md px-2 py-1 focus:ring-1 focus:ring-orange-500"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                    {allUsers.filter(u => u.role !== 'admin').length === 0 && (
+                        );
+                      })}
+                    {allUsers.filter(u => u.role !== 'admin' && (roleFilter === 'all' || u.role === roleFilter)).length === 0 && (
                       <div className="p-12 text-center text-slate-400">
                         <Users className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                        <p>Aucun utilisateur trouvé dans le système.</p>
+                        <p>Aucun utilisateur trouvé {roleFilter !== 'all' ? `pour le rôle ${roleFilter}` : 'dans le système'}.</p>
                       </div>
                     )}
                   </div>
@@ -1380,12 +1573,15 @@ export default function App() {
                   {/* Admin Stats Section (Moved to bottom) */}
                   <div className="p-6 bg-slate-50 border-t border-slate-100 space-y-8">
                     <AdminStatsGrid 
-                      title="Statistiques du jour"
+                      title={roleFilter === 'all' ? "Statistiques du jour" : `Stats : ${roleFilter}s`}
                       periodLabel={format(selectedDate, 'dd MMMM yyyy', { locale: fr })}
-                      records={attendance}
-                      totalUsers={allUsers.filter(u => u.role !== 'admin').length}
+                      records={roleFilter === 'all' ? attendance : attendance.filter(r => {
+                        const u = allUsers.find(user => user.uid === r.userId);
+                        return u && u.role === roleFilter;
+                      })}
+                      totalUsers={allUsers.filter(u => u.role !== 'admin' && (roleFilter === 'all' || u.role === roleFilter)).length}
                       date={selectedDate}
-                      color={roleColor}
+                      color={roleFilter === 'all' ? themeColor : ROLE_COLORS[roleFilter as UserRole]}
                     />
                   </div>
                 </div>
@@ -1450,6 +1646,14 @@ export default function App() {
           attendanceRecords={attendance}
           workerStats={workerStats}
           color={roleColor}
+        />
+
+        <ProfileModal 
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          profile={profile}
+          user={user}
+          themeColor={themeColor}
         />
       </div>
     </ErrorBoundary>
