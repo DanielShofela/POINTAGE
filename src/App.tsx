@@ -33,7 +33,7 @@ import {
   handleFirestoreError,
   User
 } from './firebase';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp } from 'firebase/app';
 import firebaseConfig from '../firebase-applet-config.json';
 import { 
   signInWithEmailAndPassword,
@@ -544,18 +544,20 @@ const UserDetailModal = ({
     }
   }, [userProfile]);
 
-  if (!userProfile || !currentProfile) return null;
+  const userRecords = useMemo(() => {
+    if (!userProfile) return [];
+    return attendanceRecords
+      .filter(r => r.userId === userProfile.uid)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [attendanceRecords, userProfile]);
 
-  const userRecords = attendanceRecords
-    .filter(r => r.userId === userProfile.uid)
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  const primaryRole = editRoles[0] || userProfile.role;
-  const uColor = ROLE_COLORS[primaryRole] || ROLE_COLORS.personnel;
-  const stats = workerStats?.[userProfile.uid];
+  const primaryRole = editRoles[0] || userProfile?.role || 'personnel';
+  const uColor = ROLE_COLORS[primaryRole as UserRole] || ROLE_COLORS.personnel;
+  const stats = userProfile ? workerStats?.[userProfile.uid] : null;
 
   // Permissions check
   const canEdit = () => {
+    if (!currentProfile || !userProfile) return false;
     if (isAdmin(currentProfile)) return true;
     if (isSuper(currentProfile)) {
       // Supervisor cannot edit admin or other supervisors
@@ -579,6 +581,7 @@ const UserDetailModal = ({
   };
 
   const handleSave = async () => {
+    if (!userProfile) return;
     setIsSaving(true);
     try {
       await onUpdateUser(userProfile.uid, {
@@ -597,7 +600,7 @@ const UserDetailModal = ({
 
   return (
     <AnimatePresence>
-      {isOpen && (
+      {isOpen && userProfile && currentProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -1262,12 +1265,13 @@ export default function App() {
   };
 
   useEffect(() => {
+    let unsubProfile: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
         // Listen to the user's profile in real-time
         const userDocRef = doc(db, 'users', currentUser.uid);
-        const unsubProfile = onSnapshot(userDocRef, async (userDoc) => {
+        unsubProfile = onSnapshot(userDocRef, async (userDoc) => {
           if (userDoc.exists()) {
             const profileData = userDoc.data() as UserProfile;
             if (profileData.suspended) {
@@ -1301,16 +1305,21 @@ export default function App() {
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`, currentUser);
           setLoading(false);
         });
-
-        return () => unsubProfile();
       } else {
+        if (unsubProfile) {
+          unsubProfile();
+          unsubProfile = null;
+        }
         setUser(null);
         setProfile(null);
         setLoading(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
 
   // Fetch all users for admin/super
@@ -1360,7 +1369,12 @@ export default function App() {
     if (!user || !profile) return;
     
     // Use a secondary app instance to create the user without logging out the current one
-    const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
+    let secondaryApp;
+    try {
+      secondaryApp = getApp('Secondary');
+    } catch (e) {
+      secondaryApp = initializeApp(firebaseConfig, 'Secondary');
+    }
     const secondaryAuth = getAuth(secondaryApp);
     
     try {
@@ -1567,14 +1581,26 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={cn("min-h-screen font-sans transition-colors duration-500", themeColor.bg, "selection:bg-slate-200")}>
-        {/* Header */}
-        <header className={cn(
-          "sticky top-0 z-50 transition-all duration-500 border-b backdrop-blur-md",
-          profile?.role === 'admin' 
-            ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/10" 
-            : cn("bg-white/80 border-slate-200", themeColor.border)
-        )}>
+      <AnimatePresence mode="wait">
+        {loading ? (
+          <LoadingScreen key="loading" />
+        ) : !user ? (
+          <LoginScreen key="login" />
+        ) : (
+          <motion.div 
+            key="app"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={cn("min-h-screen font-sans transition-colors duration-500", themeColor.bg, "selection:bg-slate-200")}
+          >
+            {/* Header */}
+            <header className={cn(
+              "sticky top-0 z-50 transition-all duration-500 border-b backdrop-blur-md",
+              profile?.role === 'admin' 
+                ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/10" 
+                : cn("bg-white/80 border-slate-200", themeColor.border)
+            )}>
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={cn(
@@ -1693,24 +1719,27 @@ export default function App() {
                     )}
 
                     {profile?.role === 'ouvrier' && profile.dailyRate && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500 shadow-sm", `${themeColor.bg} ${themeColor.border}`)}
-                      >
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie Actualisée</div>
-                          <div className={cn("text-xl font-black", themeColor.textPrimary)}>
-                            {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
+                      <AnimatePresence>
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 10 }}
+                          className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500 shadow-sm", `${themeColor.bg} ${themeColor.border}`)}
+                        >
+                          <div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie Actualisée</div>
+                            <div className={cn("text-xl font-black", themeColor.textPrimary)}>
+                              {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours validés</div>
-                          <div className="text-lg font-bold text-slate-700">
-                            {workerStats?.[profile.uid]?.presentDays || 0} j
+                          <div className="text-right">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours validés</div>
+                            <div className="text-lg font-bold text-slate-700">
+                              {workerStats?.[profile.uid]?.presentDays || 0} j
+                            </div>
                           </div>
-                        </div>
-                      </motion.div>
+                        </motion.div>
+                      </AnimatePresence>
                     )}
                   </div>
                 </div>
@@ -1741,62 +1770,72 @@ export default function App() {
                   </div>
                 </div>
 
-                {!showCalendar ? (
-                  <div className="flex items-center justify-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    <div className="text-center">
-                      <div className="text-sm text-slate-400 font-medium uppercase tracking-wider mb-1">Date sélectionnée</div>
-                      <div className="text-xl font-bold text-slate-700 capitalize">
-                        {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}
+                <AnimatePresence mode="wait">
+                  {!showCalendar ? (
+                    <motion.div 
+                      key="selected-date"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="flex items-center justify-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200"
+                    >
+                      <div className="text-center">
+                        <div className="text-sm text-slate-400 font-medium uppercase tracking-wider mb-1">Date sélectionnée</div>
+                        <div className="text-xl font-bold text-slate-700 capitalize">
+                          {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ) : (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <div className="text-center mb-4 font-semibold text-slate-600 capitalize">
-                      {format(currentMonth, 'MMMM yyyy', { locale: fr })}
-                    </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="calendar-grid"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="text-center mb-4 font-semibold text-slate-600 capitalize">
+                        {format(currentMonth, 'MMMM yyyy', { locale: fr })}
+                      </div>
 
-                    <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 mb-2">
-                      {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => <div key={`${d}-${i}`}>{d}</div>)}
-                    </div>
+                      <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 mb-2">
+                        {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => <div key={`${d}-${i}`}>{d}</div>)}
+                      </div>
 
-                    <div className="grid grid-cols-7 gap-1">
-                      {eachDayOfInterval({
-                        start: startOfMonth(currentMonth),
-                        end: endOfMonth(currentMonth)
-                      }).map(day => {
-                        const isSelected = isSameDay(day, selectedDate);
-                        const isTodayDate = isToday(day);
-                        const record = attendance.find(r => r.userId === user.uid && r.date === format(day, 'yyyy-MM-dd'));
-                        
-                        return (
-                          <button
-                            key={day.toString()}
-                            onClick={() => setSelectedDate(day)}
-                            className={cn(
-                              "aspect-square flex items-center justify-center text-sm rounded-xl transition-all relative",
-                              isSelected ? `${themeColor.bgPrimary} text-white shadow-md ${themeColor.shadow}` : "hover:bg-slate-50",
-                              !isSelected && isTodayDate && `${themeColor.textPrimary} font-bold ring-2 ${themeColor.ring}`
-                            )}
-                          >
-                            {format(day, 'd')}
-                            {!isSelected && (isBefore(day, startOfDay(new Date())) || isToday(day)) && (
-                              <div className={cn(
-                                "absolute bottom-1 w-1 h-1 rounded-full",
-                                record?.status === 'present' ? "bg-green-500" : "bg-red-500"
-                              )} />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
+                      <div className="grid grid-cols-7 gap-1">
+                        {eachDayOfInterval({
+                          start: startOfMonth(currentMonth),
+                          end: endOfMonth(currentMonth)
+                        }).map(day => {
+                          const isSelected = isSameDay(day, selectedDate);
+                          const isTodayDate = isToday(day);
+                          const record = attendance.find(r => r.userId === user.uid && r.date === format(day, 'yyyy-MM-dd'));
+                          
+                          return (
+                            <button
+                              key={day.toString()}
+                              onClick={() => setSelectedDate(day)}
+                              className={cn(
+                                "aspect-square flex items-center justify-center text-sm rounded-xl transition-all relative",
+                                isSelected ? `${themeColor.bgPrimary} text-white shadow-md ${themeColor.shadow}` : "hover:bg-slate-50",
+                                !isSelected && isTodayDate && `${themeColor.textPrimary} font-bold ring-2 ${themeColor.ring}`
+                              )}
+                            >
+                              {format(day, 'd')}
+                              {!isSelected && (isBefore(day, startOfDay(new Date())) || isToday(day)) && (
+                                <div className={cn(
+                                  "absolute bottom-1 w-1 h-1 rounded-full",
+                                  record?.status === 'present' ? "bg-green-500" : "bg-red-500"
+                                )} />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Stats Section (Only for non-admins here) */}
@@ -2216,7 +2255,9 @@ export default function App() {
           user={user}
           themeColor={themeColor}
         />
-      </div>
-    </ErrorBoundary>
-  );
+      </motion.div>
+    )}
+  </AnimatePresence>
+</ErrorBoundary>
+);
 }
