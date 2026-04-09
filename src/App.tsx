@@ -33,9 +33,12 @@ import {
   handleFirestoreError,
   User
 } from './firebase';
+import { initializeApp } from 'firebase/app';
+import firebaseConfig from '../firebase-applet-config.json';
 import { 
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  getAuth
 } from 'firebase/auth';
 import { 
   LogOut, 
@@ -81,6 +84,7 @@ interface UserProfile {
   password?: string;
   displayName: string;
   role: UserRole;
+  roles?: UserRole[];
   dailyRate?: number; // Pour les ouvriers
   suspended?: boolean;
   createdAt?: Timestamp;
@@ -89,6 +93,22 @@ interface UserProfile {
   lastUpdatedByName?: string;
   lastUpdatedAt?: Timestamp;
 }
+
+const getPrimaryRole = (profile: UserProfile | null): UserRole => {
+  if (!profile) return 'personnel';
+  if (profile.roles && profile.roles.length > 0) return profile.roles[0];
+  return profile.role;
+};
+
+const hasRole = (profile: UserProfile | null, role: UserRole): boolean => {
+  if (!profile) return false;
+  if (profile.roles) return profile.roles.includes(role);
+  return profile.role === role;
+};
+
+const isAdmin = (profile: UserProfile | null) => hasRole(profile, 'admin');
+const isSuper = (profile: UserProfile | null) => hasRole(profile, 'superviseur');
+const isAdminOrSuper = (profile: UserProfile | null) => isAdmin(profile) || isSuper(profile);
 
 const ROLE_COLORS: Record<UserRole, { 
   primary: string, 
@@ -419,7 +439,17 @@ const ProfileModal = ({
               </div>
               
               <h2 className="text-2xl font-black text-slate-800">Mon Profil</h2>
-              <p className="text-slate-500 text-sm">Personnalisez votre identité sur la plateforme</p>
+              <div className="flex flex-wrap justify-center gap-2 mt-2">
+                {profile && (profile.roles || [profile.role]).map(r => (
+                  <span key={r} className={cn(
+                    "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                    ROLE_COLORS[r].bg, ROLE_COLORS[r].text
+                  )}>
+                    {r}
+                  </span>
+                ))}
+              </div>
+              <p className="text-slate-500 text-sm mt-1">Personnalisez votre identité sur la plateforme</p>
             </div>
 
             <form onSubmit={handleSave} className="p-8 space-y-6">
@@ -482,29 +512,88 @@ const ProfileModal = ({
   );
 };
 
-const UserConsultationModal = ({ 
+const UserDetailModal = ({ 
   isOpen, 
   onClose, 
   userProfile, 
   attendanceRecords,
   workerStats,
-  color
+  currentProfile,
+  onUpdateUser
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
   userProfile: UserProfile | null, 
   attendanceRecords: AttendanceRecord[],
   workerStats: Record<string, { presentDays: number, totalPay: number }> | null,
-  color?: { primary: string, bg: string, text: string, ring: string }
+  currentProfile: UserProfile | null,
+  onUpdateUser: (uid: string, data: Partial<UserProfile>) => Promise<void>
 }) => {
-  if (!userProfile) return null;
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editRoles, setEditRoles] = useState<UserRole[]>([]);
+  const [editDailyRate, setEditDailyRate] = useState<number>(0);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (userProfile) {
+      setEditName(userProfile.displayName);
+      setEditRoles(userProfile.roles || [userProfile.role]);
+      setEditDailyRate(userProfile.dailyRate || 0);
+      setIsEditing(false);
+    }
+  }, [userProfile]);
+
+  if (!userProfile || !currentProfile) return null;
 
   const userRecords = attendanceRecords
     .filter(r => r.userId === userProfile.uid)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const uColor = ROLE_COLORS[userProfile.role] || ROLE_COLORS.personnel;
+  const primaryRole = editRoles[0] || userProfile.role;
+  const uColor = ROLE_COLORS[primaryRole] || ROLE_COLORS.personnel;
   const stats = workerStats?.[userProfile.uid];
+
+  // Permissions check
+  const canEdit = () => {
+    if (isAdmin(currentProfile)) return true;
+    if (isSuper(currentProfile)) {
+      // Supervisor cannot edit admin or other supervisors
+      return !isAdmin(userProfile) && !isSuper(userProfile);
+    }
+    return false;
+  };
+
+  const handleToggleRole = (role: UserRole) => {
+    if (editRoles.includes(role)) {
+      if (editRoles.length > 1) {
+        setEditRoles(editRoles.filter(r => r !== role));
+      }
+    } else {
+      if (editRoles.length < 2) {
+        setEditRoles([...editRoles, role]);
+      } else {
+        setEditRoles([editRoles[0], role]);
+      }
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onUpdateUser(userProfile.uid, {
+        displayName: editName,
+        roles: editRoles,
+        role: editRoles[0],
+        dailyRate: editDailyRate
+      });
+      setIsEditing(false);
+    } catch (error) {
+      console.error("Error updating user:", error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -524,84 +613,156 @@ const UserConsultationModal = ({
                   className="w-12 h-12 rounded-2xl bg-white/20 object-cover"
                 />
                 <div>
-                  <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
-                  <p className="text-white/80 text-sm">{userProfile.email || 'Sans email'} • <span className="capitalize">{userProfile.role}</span></p>
+                  {isEditing ? (
+                    <input 
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="bg-white/20 border-none rounded px-2 py-1 text-white font-bold text-xl outline-none focus:ring-2 focus:ring-white/50"
+                    />
+                  ) : (
+                    <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
+                  )}
+                  <p className="text-white/80 text-sm">
+                    {userProfile.email || 'Sans email'} • 
+                    <span className="capitalize ml-1">
+                      {editRoles.join(' & ')}
+                    </span>
+                  </p>
                 </div>
               </div>
-              <button 
-                onClick={onClose}
-                className="p-2 hover:bg-white/10 rounded-xl transition-colors"
-              >
-                <XCircle className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-2">
+                {canEdit() && (
+                  <button 
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+                    title={isEditing ? "Annuler" : "Modifier"}
+                  >
+                    {isEditing ? <XCircle className="w-6 h-6" /> : <ShieldCheck className="w-6 h-6" />}
+                  </button>
+                )}
+                <button 
+                  onClick={onClose}
+                  className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
-              {userProfile.role === 'ouvrier' && stats && (
-                <div className="bg-white p-6 rounded-3xl border border-orange-100 shadow-sm flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center">
-                      <BarChart3 className="w-6 h-6 text-orange-600" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Salaire Total Cumulé</div>
-                      <div className="text-2xl font-black text-orange-600">{stats.totalPay.toLocaleString()} FCFA</div>
+              {isEditing ? (
+                <div className="space-y-6 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Fonctions (Max 2)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {(['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] as UserRole[]).map(r => (
+                        <button
+                          key={r}
+                          onClick={() => handleToggleRole(r)}
+                          disabled={r === 'admin' && !isAdmin(currentProfile)}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                            editRoles.includes(r) 
+                              ? `${ROLE_COLORS[r].bg} ${ROLE_COLORS[r].text} ring-2 ${ROLE_COLORS[r].ring}`
+                              : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                          )}
+                        >
+                          {r}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours Présents</div>
-                    <div className="text-xl font-bold text-slate-700">{stats.presentDays} jours</div>
-                  </div>
-                </div>
-              )}
 
-              <div>
-                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Historique des 7 derniers jours</h4>
-                <div className="space-y-3">
-                  {eachDayOfInterval({
-                    start: subDays(new Date(), 6),
-                    end: new Date()
-                  }).reverse().map(day => {
-                    const dateStr = format(day, 'yyyy-MM-dd');
-                    const record = attendanceRecords.find(r => r.userId === userProfile.uid && r.date === dateStr);
-                    
-                    return (
-                      <div key={dateStr} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className={cn(
-                            "w-10 h-10 rounded-xl flex items-center justify-center",
-                            record?.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
-                          )}>
-                            {record?.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-                          </div>
-                          <div>
-                            <div className="font-bold text-slate-700 capitalize text-sm">
-                              {format(day, 'EEEE d MMMM yyyy', { locale: fr })}
-                            </div>
-                            <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
-                              <ArrowRightLeft className="w-2 h-2" />
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
-                            </div>
-                            {record?.updatedByName && (
-                              <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
-                                <ShieldCheck className="w-2 h-2" />
-                                Modifié par {record.updatedByName} le {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
-                              </div>
-                            )}
-                          </div>
+                  {editRoles.includes('ouvrier') && (
+                    <div className="space-y-3">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Taux Journalier (FCFA)</label>
+                      <input 
+                        type="number"
+                        value={editDailyRate}
+                        onChange={(e) => setEditDailyRate(parseInt(e.target.value) || 0)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+                      />
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="w-full py-4 bg-emerald-600 text-white font-bold rounded-2xl shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                  >
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                    Enregistrer les modifications
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {userProfile.role === 'ouvrier' && stats && (
+                    <div className="bg-white p-6 rounded-3xl border border-orange-100 shadow-sm flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center">
+                          <BarChart3 className="w-6 h-6 text-orange-600" />
                         </div>
-                        <div className={cn(
-                          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                          record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                        )}>
-                          {record?.status === 'present' ? 'Présent' : 'Absent'}
+                        <div>
+                          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Salaire Total Cumulé</div>
+                          <div className="text-2xl font-black text-orange-600">{stats.totalPay.toLocaleString()} FCFA</div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      <div className="text-right">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jours Présents</div>
+                        <div className="text-xl font-bold text-slate-700">{stats.presentDays} jours</div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Historique des 7 derniers jours</h4>
+                    <div className="space-y-3">
+                      {eachDayOfInterval({
+                        start: subDays(new Date(), 6),
+                        end: new Date()
+                      }).reverse().map(day => {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const record = attendanceRecords.find(r => r.userId === userProfile.uid && r.date === dateStr);
+                        
+                        return (
+                          <div key={dateStr} className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center",
+                                record?.status === 'present' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                              )}>
+                                {record?.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                              </div>
+                              <div>
+                                <div className="font-bold text-slate-700 capitalize text-sm">
+                                  {format(day, 'EEEE d MMMM yyyy', { locale: fr })}
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
+                                  <ArrowRightLeft className="w-2 h-2" />
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
+                                </div>
+                                {record?.updatedByName && (
+                                  <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
+                                    <ShieldCheck className="w-2 h-2" />
+                                    Modifié par {record.updatedByName} le {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className={cn(
+                              "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                              record?.status === 'present' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            )}>
+                              {record?.status === 'present' ? 'Présent' : 'Absent'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="p-6 border-t border-slate-100 bg-white">
@@ -612,6 +773,187 @@ const UserConsultationModal = ({
                 Fermer
               </button>
             </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const CreateUserModal = ({ 
+  isOpen, 
+  onClose, 
+  onCreated,
+  currentProfile
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onCreated: (data: any) => Promise<void>,
+  currentProfile: UserProfile | null
+}) => {
+  const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [roles, setRoles] = useState<UserRole[]>(['personnel']);
+  const [dailyRate, setDailyRate] = useState<number>(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleToggleRole = (role: UserRole) => {
+    if (roles.includes(role)) {
+      if (roles.length > 1) {
+        setRoles(roles.filter(r => r !== role));
+      }
+    } else {
+      if (roles.length < 2) {
+        setRoles([...roles, role]);
+      } else {
+        setRoles([roles[0], role]);
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUsername = username.trim().toLowerCase();
+    if (!cleanUsername || !password || !displayName) {
+      setError('Veuillez remplir tous les champs.');
+      return;
+    }
+    
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onCreated({
+        displayName,
+        username: cleanUsername,
+        password,
+        roles,
+        role: roles[0],
+        dailyRate
+      });
+      onClose();
+      // Reset form
+      setDisplayName('');
+      setUsername('');
+      setPassword('');
+      setRoles(['personnel']);
+      setDailyRate(0);
+    } catch (err: any) {
+      setError(err.message || "Erreur lors de la création du compte.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100"
+          >
+            <div className="p-8 bg-emerald-600 text-white text-center relative">
+              <button 
+                onClick={onClose}
+                className="absolute top-6 right-6 p-2 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+              <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <UserPlus className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black">Nouveau Compte</h2>
+              <p className="text-emerald-100 text-sm">Créez un accès pour un collaborateur</p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-8 space-y-4 max-h-[70vh] overflow-y-auto">
+              {error && (
+                <div className="p-4 bg-red-50 text-red-600 text-sm font-medium rounded-2xl border border-red-100">
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom Complet</label>
+                <input 
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all bg-slate-50/50"
+                  placeholder="Jean Dupont"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Identifiant</label>
+                <input 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all bg-slate-50/50"
+                  placeholder="jdupont"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Mot de Passe</label>
+                <input 
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-emerald-500 transition-all bg-slate-50/50"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Fonctions (Max 2)</label>
+                <div className="flex flex-wrap gap-2">
+                  {(['admin', 'superviseur', 'personnel', 'stagiaire', 'ouvrier'] as UserRole[]).map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => handleToggleRole(r)}
+                      disabled={r === 'admin' && !isAdmin(currentProfile)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                        roles.includes(r) 
+                          ? `${ROLE_COLORS[r].bg} ${ROLE_COLORS[r].text} ring-2 ${ROLE_COLORS[r].ring}`
+                          : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {roles.includes('ouvrier') && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Taux Journalier (FCFA)</label>
+                  <input 
+                    type="number"
+                    value={dailyRate}
+                    onChange={(e) => setDailyRate(parseInt(e.target.value) || 0)}
+                    className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-orange-500 transition-all bg-slate-50/50"
+                  />
+                </div>
+              )}
+
+              <button 
+                type="submit"
+                disabled={isSaving}
+                className="w-full py-4 bg-emerald-600 text-white font-bold rounded-2xl shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 mt-4"
+              >
+                {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
+                Créer le compte
+              </button>
+            </form>
           </motion.div>
         </div>
       )}
@@ -896,10 +1238,28 @@ export default function App() {
   const [selectedUserForConsult, setSelectedUserForConsult] = useState<UserProfile | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [editingTime, setEditingTime] = useState<{ userId: string, type: 'checkIn' | 'checkOut' } | null>(null);
   const [tempTime, setTempTime] = useState('');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -982,7 +1342,56 @@ export default function App() {
     }
   }, [user, profile]);
 
-  // Calculate worker pay
+  const handleUpdateUser = async (uid: string, data: Partial<UserProfile>) => {
+    if (!user || !profile) return;
+    try {
+      await updateDoc(doc(db, 'users', uid), {
+        ...data,
+        lastUpdatedBy: user.uid,
+        lastUpdatedByName: profile.displayName,
+        lastUpdatedAt: Timestamp.now()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`, user);
+    }
+  };
+
+  const handleCreateUser = async (data: any) => {
+    if (!user || !profile) return;
+    
+    // Use a secondary app instance to create the user without logging out the current one
+    const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
+    const secondaryAuth = getAuth(secondaryApp);
+    
+    try {
+      const email = `${data.username}@attendance.app`;
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, data.password);
+      const uid = userCredential.user.uid;
+
+      const userDoc: UserProfile = {
+        uid: uid,
+        displayName: data.displayName,
+        email: email,
+        role: data.role,
+        roles: data.roles,
+        username: data.username,
+        dailyRate: data.dailyRate,
+        suspended: false,
+        createdAt: Timestamp.now(),
+        lastUpdatedBy: user.uid,
+        lastUpdatedByName: profile.displayName,
+        lastUpdatedAt: Timestamp.now()
+      };
+      
+      await setDoc(doc(db, 'users', uid), userDoc);
+      
+      // Sign out from the secondary app to clean up
+      await secondaryAuth.signOut();
+    } catch (error: any) {
+      console.error('Error creating user:', error);
+      throw error;
+    }
+  };
   const workerStats = useMemo(() => {
     if (!profile) return null;
     
@@ -1105,7 +1514,7 @@ export default function App() {
     return ROLE_COLORS[profile?.role || 'personnel'] || ROLE_COLORS.personnel;
   }, [profile?.role]);
 
-  const isAdminOrSuper = profile?.role === 'admin' || profile?.role === 'superviseur';
+  const isAuthorizedToMark = isAdminOrSuper(profile);
 
   const themeColor = useMemo(() => {
     return roleColor;
@@ -1187,22 +1596,31 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-4">
+              {deferredPrompt && (
+                <button 
+                  onClick={handleInstallClick}
+                  className="hidden sm:flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-xl font-bold text-xs hover:bg-emerald-200 transition-all"
+                >
+                  <Upload className="w-4 h-4 rotate-180" />
+                  Installer
+                </button>
+              )}
               <div 
                 className="flex items-center gap-2 text-sm cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={() => setIsProfileModalOpen(true)}
               >
                 <div className="hidden sm:flex flex-col items-end">
-                  <span className={cn("font-semibold", profile?.role === 'admin' ? "text-white" : "text-slate-700")}>{profile?.displayName}</span>
+                  <span className={cn("font-semibold", isAdmin(profile) ? "text-white" : "text-slate-700")}>{profile?.displayName}</span>
                   <span className={cn(
                     "text-xs capitalize flex items-center gap-1 font-bold",
-                    profile?.role === 'admin' ? "text-emerald-100" : themeColor.textPrimary
+                    isAdmin(profile) ? "text-emerald-100" : themeColor.textPrimary
                   )}>
-                    {profile?.role === 'admin' && <ShieldCheck className="w-3 h-3" />}
-                    {profile?.role === 'superviseur' && <ShieldCheck className="w-3 h-3 text-purple-500" />}
-                    {profile?.role === 'personnel' && <UserIcon className="w-3 h-3" />}
-                    {profile?.role === 'stagiaire' && <UserIcon className="w-3 h-3" />}
-                    {profile?.role === 'ouvrier' && <UserIcon className="w-3 h-3" />}
-                    {profile?.role}
+                    {isAdmin(profile) && <ShieldCheck className="w-3 h-3" />}
+                    {isSuper(profile) && <ShieldCheck className="w-3 h-3 text-purple-500" />}
+                    {hasRole(profile, 'personnel') && <UserIcon className="w-3 h-3" />}
+                    {hasRole(profile, 'stagiaire') && <UserIcon className="w-3 h-3" />}
+                    {hasRole(profile, 'ouvrier') && <UserIcon className="w-3 h-3" />}
+                    {profile?.roles ? profile.roles.join(' & ') : profile?.role}
                   </span>
                 </div>
                 <img 
@@ -1398,7 +1816,7 @@ export default function App() {
 
             {/* Right Column: Main Content */}
             <div className="lg:col-span-8">
-              {isAdminOrSuper ? (
+              {isAuthorizedToMark ? (
                 <div className={cn("bg-white rounded-3xl shadow-xl border overflow-hidden transition-all duration-500", `${themeColor.border} ${themeColor.shadow}`)}>
                   <div className={cn("p-6 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4", themeColor.border, `${themeColor.bg} opacity-80`)}>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
@@ -1410,9 +1828,18 @@ export default function App() {
                         <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
                       </div>
                     </div>
-                    {isToday(selectedDate) && (
-                      <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `${themeColor.bgPrimary} text-white`)}>Aujourd'hui</span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => setIsCreateUserModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all shadow-md"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        Nouveau Compte
+                      </button>
+                      {isToday(selectedDate) && (
+                        <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `${themeColor.bgPrimary} text-white`)}>Aujourd'hui</span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="px-6 py-3 bg-slate-50/50 border-b flex flex-wrap gap-2 items-center">
@@ -1633,7 +2060,7 @@ export default function App() {
                               </div>
 
                               {/* Admin & Superviseur: Role & Rate management */}
-                              {isAdminOrSuper && (
+                              {isAuthorizedToMark && (
                                 <div className="flex items-center gap-2 pt-2 border-t border-slate-50">
                                   <select 
                                     value={u.role}
@@ -1760,14 +2187,26 @@ export default function App() {
           </div>
         </main>
 
-        {/* Consultation Modal */}
-        <UserConsultationModal 
+        {/* User Detail Modal */}
+        <UserDetailModal 
           isOpen={isConsultModalOpen}
-          onClose={() => setIsConsultModalOpen(false)}
+          onClose={() => {
+            setIsConsultModalOpen(false);
+            setSelectedUserForConsult(null);
+          }}
           userProfile={selectedUserForConsult}
           attendanceRecords={attendance}
           workerStats={workerStats}
-          color={roleColor}
+          currentProfile={profile}
+          onUpdateUser={handleUpdateUser}
+        />
+
+        {/* Create User Modal */}
+        <CreateUserModal 
+          isOpen={isCreateUserModalOpen}
+          onClose={() => setIsCreateUserModalOpen(false)}
+          onCreated={handleCreateUser}
+          currentProfile={profile}
         />
 
         <ProfileModal 
