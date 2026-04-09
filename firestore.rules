@@ -72,7 +72,10 @@ service cloud.firestore {
              data.displayName is string &&
              (!('dailyRate' in data) || data.dailyRate is number) &&
              (!('suspended' in data) || data.suspended is bool) &&
-             (!('photoURL' in data) || data.photoURL is string);
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('lastUpdatedBy' in data) || data.lastUpdatedBy is string) &&
+             (!('lastUpdatedByName' in data) || data.lastUpdatedByName is string) &&
+             (!('lastUpdatedAt' in data) || data.lastUpdatedAt is timestamp);
     }
 
     function isValidAttendance(data) {
@@ -82,6 +85,9 @@ service cloud.firestore {
              data.status in ['present', 'absent'] &&
              data.markedBy is string &&
              data.timestamp is timestamp &&
+             (!('markedByName' in data) || data.markedByName is string) &&
+             (!('updatedBy' in data) || data.updatedBy is string) &&
+             (!('updatedByName' in data) || data.updatedByName is string) &&
              (!('checkIn' in data) || data.checkIn is timestamp || data.checkIn == null) &&
              (!('checkOut' in data) || data.checkOut is timestamp || data.checkOut == null);
     }

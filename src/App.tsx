@@ -85,20 +85,98 @@ interface UserProfile {
   suspended?: boolean;
   createdAt?: Timestamp;
   photoURL?: string;
+  lastUpdatedBy?: string;
+  lastUpdatedByName?: string;
+  lastUpdatedAt?: Timestamp;
 }
 
-const ROLE_COLORS: Record<UserRole, { primary: string, bg: string, text: string, ring: string, border: string }> = {
-  admin: { primary: 'emerald-600', bg: 'emerald-50', text: 'emerald-700', ring: 'emerald-100', border: 'border-emerald-200' },
-  superviseur: { primary: 'purple-600', bg: 'purple-50', text: 'purple-700', ring: 'purple-100', border: 'border-purple-200' },
-  personnel: { primary: 'blue-600', bg: 'blue-50', text: 'blue-700', ring: 'blue-100', border: 'border-blue-200' },
-  stagiaire: { primary: 'teal-600', bg: 'teal-50', text: 'teal-700', ring: 'teal-100', border: 'border-teal-200' },
-  ouvrier: { primary: 'orange-600', bg: 'orange-50', text: 'orange-700', ring: 'orange-100', border: 'border-orange-200' }
+const ROLE_COLORS: Record<UserRole, { 
+  primary: string, 
+  bg: string, 
+  text: string, 
+  ring: string, 
+  border: string,
+  bgPrimary: string,
+  textPrimary: string,
+  shadow: string
+}> = {
+  admin: { 
+    primary: 'emerald-600', 
+    bg: 'bg-emerald-50', 
+    text: 'text-emerald-700', 
+    ring: 'ring-emerald-100', 
+    border: 'border-emerald-200',
+    bgPrimary: 'bg-emerald-600',
+    textPrimary: 'text-emerald-600',
+    shadow: 'shadow-emerald-600/20'
+  },
+  superviseur: { 
+    primary: 'purple-600', 
+    bg: 'bg-purple-50', 
+    text: 'text-purple-700', 
+    ring: 'ring-purple-100', 
+    border: 'border-purple-200',
+    bgPrimary: 'bg-purple-600',
+    textPrimary: 'text-purple-600',
+    shadow: 'shadow-purple-600/20'
+  },
+  personnel: { 
+    primary: 'blue-600', 
+    bg: 'bg-blue-50', 
+    text: 'text-blue-700', 
+    ring: 'ring-blue-100', 
+    border: 'border-blue-200',
+    bgPrimary: 'bg-blue-600',
+    textPrimary: 'text-blue-600',
+    shadow: 'shadow-blue-600/20'
+  },
+  stagiaire: { 
+    primary: 'teal-600', 
+    bg: 'bg-teal-50', 
+    text: 'text-teal-700', 
+    ring: 'ring-teal-100', 
+    border: 'border-teal-200',
+    bgPrimary: 'bg-teal-600',
+    textPrimary: 'text-teal-600',
+    shadow: 'shadow-teal-600/20'
+  },
+  ouvrier: { 
+    primary: 'orange-600', 
+    bg: 'bg-orange-50', 
+    text: 'text-orange-700', 
+    ring: 'ring-orange-100', 
+    border: 'border-orange-200',
+    bgPrimary: 'bg-orange-600',
+    textPrimary: 'text-orange-600',
+    shadow: 'shadow-orange-600/20'
+  }
 };
 
 const STATUS_COLORS = {
-  present: { primary: 'green-600', bg: 'green-50', text: 'green-700', ring: 'green-100', border: 'border-green-200' },
-  absent: { primary: 'red-600', bg: 'red-50', text: 'red-700', ring: 'red-100', border: 'border-red-200' },
-  none: { primary: 'slate-400', bg: 'slate-50', text: 'slate-600', ring: 'slate-100', border: 'border-slate-200' }
+  present: { 
+    primary: 'green-600', 
+    bg: 'bg-green-50', 
+    text: 'text-green-700', 
+    ring: 'ring-green-100', 
+    border: 'border-green-200',
+    bgPrimary: 'bg-green-600'
+  },
+  absent: { 
+    primary: 'red-600', 
+    bg: 'bg-red-50', 
+    text: 'text-red-700', 
+    ring: 'ring-red-100', 
+    border: 'border-red-200',
+    bgPrimary: 'bg-red-600'
+  },
+  none: { 
+    primary: 'slate-400', 
+    bg: 'bg-slate-50', 
+    text: 'text-slate-600', 
+    ring: 'ring-slate-100', 
+    border: 'border-slate-200',
+    bgPrimary: 'bg-slate-400'
+  }
 };
 
 interface AttendanceRecord {
@@ -107,9 +185,12 @@ interface AttendanceRecord {
   date: string; // YYYY-MM-DD
   status: 'present' | 'absent';
   markedBy: string;
+  markedByName?: string;
   checkIn?: Timestamp;
   checkOut?: Timestamp;
   timestamp: Timestamp;
+  updatedBy?: string;
+  updatedByName?: string;
 }
 
 // --- Components ---
@@ -160,7 +241,7 @@ const LoadingScreen = () => (
   </div>
 );
 
-const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date, color }: { title: string, records: AttendanceRecord[], periodLabel: string, totalUsers: number, date: Date, color?: { primary: string, bg: string, text: string, ring: string } }) => {
+const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date, color }: { title: string, records: AttendanceRecord[], periodLabel: string, totalUsers: number, date: Date, color?: any }) => {
   const dateStr = format(date, 'yyyy-MM-dd');
   const dayRecords = records.filter(r => r.date === dateStr);
   const presentCount = dayRecords.filter(r => r.status === 'present').length;
@@ -174,7 +255,7 @@ const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date, color }
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-slate-700 flex items-center gap-2">
-          <BarChart3 className={cn("w-4 h-4", color ? `text-${color.primary}` : "text-emerald-600")} />
+          <BarChart3 className={cn("w-4 h-4", color ? color.textPrimary : "text-emerald-600")} />
           {title}
         </h3>
         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{periodLabel}</span>
@@ -198,7 +279,7 @@ const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date, color }
           </div>
           <span className="text-xl font-bold text-red-600">{absentCount}</span>
         </div>
-        <div className={cn("flex items-center justify-between p-4 rounded-2xl shadow-md", color ? `bg-${color.primary} shadow-${color.primary}/20` : "bg-emerald-600 shadow-emerald-100")}>
+        <div className={cn("flex items-center justify-between p-4 rounded-2xl shadow-md", color ? `${color.bgPrimary} ${color.shadow}` : "bg-emerald-600 shadow-emerald-600/20")}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
               <BarChart3 className="w-4 h-4 text-white" />
@@ -212,7 +293,7 @@ const AdminStatsGrid = ({ title, records, periodLabel, totalUsers, date, color }
   );
 };
 
-const StatsCard = ({ title, records, periodLabel, color }: { title: string, records: AttendanceRecord[], periodLabel: string, color?: { primary: string, bg: string, text: string, ring: string } }) => {
+const StatsCard = ({ title, records, periodLabel, color }: { title: string, records: AttendanceRecord[], periodLabel: string, color?: any }) => {
   const presentCount = records.filter(r => r.status === 'present').length;
   const absentCount = records.filter(r => r.status === 'absent').length;
   const totalRecords = records.length;
@@ -220,10 +301,10 @@ const StatsCard = ({ title, records, periodLabel, color }: { title: string, reco
   const rate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
   return (
-    <div className={cn("bg-white p-6 rounded-3xl shadow-sm border", color ? `border-${color.ring}` : "border-slate-200")}>
+    <div className={cn("bg-white p-6 rounded-3xl shadow-sm border", color ? color.border : "border-slate-200")}>
       <div className="flex items-center justify-between mb-6">
         <h2 className="font-bold text-lg flex items-center gap-2">
-          <BarChart3 className={cn("w-5 h-5", color ? `text-${color.primary}` : "text-emerald-600")} />
+          <BarChart3 className={cn("w-5 h-5", color ? color.textPrimary : "text-emerald-600")} />
           {title}
         </h2>
         <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{periodLabel}</div>
@@ -244,8 +325,8 @@ const StatsCard = ({ title, records, periodLabel, color }: { title: string, reco
           </div>
           <span className="text-xl font-bold text-red-700">{absentCount}</span>
         </div>
-        <div className={cn("pt-4 border-t text-center", color ? `border-${color.ring}` : "border-slate-100")}>
-          <div className={cn("text-3xl font-black", color ? `text-${color.primary}` : "text-emerald-600")}>{rate}%</div>
+        <div className={cn("pt-4 border-t text-center", color ? color.border : "border-slate-100")}>
+          <div className={cn("text-3xl font-black", color ? color.textPrimary : "text-emerald-600")}>{rate}%</div>
           <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Taux de présence</div>
         </div>
       </div>
@@ -317,7 +398,7 @@ const ProfileModal = ({
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100"
           >
-            <div className={cn("p-8 text-center relative", `bg-${themeColor.bg}`)}>
+            <div className={cn("p-8 text-center relative", themeColor.bg)}>
               <button 
                 onClick={onClose}
                 className="absolute top-6 right-6 p-2 hover:bg-white/50 rounded-full transition-colors"
@@ -329,10 +410,10 @@ const ProfileModal = ({
                 <img 
                   src={photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`} 
                   alt="Avatar" 
-                  className={cn("w-24 h-24 rounded-full border-4 shadow-lg", `border-${themeColor.primary}/20`)}
+                  className={cn("w-24 h-24 rounded-full border-4 shadow-lg", themeColor.border)}
                   referrerPolicy="no-referrer"
                 />
-                <div className={cn("absolute -bottom-1 -right-1 p-2 rounded-full shadow-md", `bg-${themeColor.primary} text-white`)}>
+                <div className={cn("absolute -bottom-1 -right-1 p-2 rounded-full shadow-md", `${themeColor.bgPrimary} text-white`)}>
                   <UserIcon className="w-4 h-4" />
                 </div>
               </div>
@@ -385,7 +466,7 @@ const ProfileModal = ({
                   disabled={isSaving}
                   className={cn(
                     "flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2",
-                    `bg-${themeColor.primary} hover:shadow-${themeColor.primary}/30 shadow-${themeColor.primary}/20`,
+                    `${themeColor.bgPrimary} ${themeColor.shadow}`,
                     isSaving && "opacity-70 cursor-not-allowed"
                   )}
                 >
@@ -435,7 +516,7 @@ const UserConsultationModal = ({
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
           >
-            <div className={cn("p-6 border-b flex items-center justify-between text-white", `bg-${uColor.primary}`)}>
+            <div className={cn("p-6 border-b flex items-center justify-between text-white", uColor.bgPrimary)}>
               <div className="flex items-center gap-4">
                 <img 
                   src={userProfile.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
@@ -502,6 +583,12 @@ const UserConsultationModal = ({
                               <ArrowRightLeft className="w-2 h-2" />
                               <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
                             </div>
+                            {record?.updatedByName && (
+                              <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
+                                <ShieldCheck className="w-2 h-2" />
+                                Modifié par {record.updatedByName} le {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className={cn(
@@ -946,7 +1033,9 @@ export default function App() {
         await updateDoc(doc(db, 'attendance', existingRecord.id), {
           [type]: timestamp,
           status: hasCheckIn ? 'present' : 'absent',
-          timestamp: serverTimestamp()
+          timestamp: serverTimestamp(),
+          updatedBy: profile.uid,
+          updatedByName: profile.displayName
         });
       } else {
         await addDoc(collection(db, 'attendance'), {
@@ -954,8 +1043,11 @@ export default function App() {
           date: dateStr,
           status: type === 'checkIn' ? 'present' : 'absent',
           markedBy: profile.uid,
+          markedByName: profile.displayName,
           [type]: timestamp,
-          timestamp: serverTimestamp()
+          timestamp: serverTimestamp(),
+          updatedBy: profile.uid,
+          updatedByName: profile.displayName
         });
       }
     } catch (error) {
@@ -977,7 +1069,9 @@ export default function App() {
           status: 'absent',
           checkIn: null,
           checkOut: null,
-          timestamp: serverTimestamp()
+          timestamp: serverTimestamp(),
+          updatedBy: profile.uid,
+          updatedByName: profile.displayName
         });
       } else {
         await addDoc(collection(db, 'attendance'), {
@@ -985,7 +1079,10 @@ export default function App() {
           date: dateStr,
           status: 'absent',
           markedBy: profile.uid,
-          timestamp: serverTimestamp()
+          markedByName: profile.displayName,
+          timestamp: serverTimestamp(),
+          updatedBy: profile.uid,
+          updatedByName: profile.displayName
         });
       }
     } catch (error) {
@@ -1021,7 +1118,10 @@ export default function App() {
     if (!profile || (profile.role !== 'admin' && profile.role !== 'superviseur')) return;
     try {
       await updateDoc(doc(db, 'users', userId), {
-        suspended: !currentStatus
+        suspended: !currentStatus,
+        lastUpdatedBy: profile.uid,
+        lastUpdatedByName: profile.displayName,
+        lastUpdatedAt: serverTimestamp()
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`, user);
@@ -1031,7 +1131,12 @@ export default function App() {
   const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
     try {
-      await updateDoc(doc(db, 'users', userId), { role: newRole });
+      await updateDoc(doc(db, 'users', userId), { 
+        role: newRole,
+        lastUpdatedBy: profile.uid,
+        lastUpdatedByName: profile.displayName,
+        lastUpdatedAt: serverTimestamp()
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${userId}`, user);
     }
@@ -1040,7 +1145,12 @@ export default function App() {
   const handleUpdateDailyRate = async (userId: string, rate: number) => {
     if (profile?.role !== 'admin' && profile?.role !== 'superviseur') return;
     try {
-      await updateDoc(doc(db, 'users', userId), { dailyRate: rate });
+      await updateDoc(doc(db, 'users', userId), { 
+        dailyRate: rate,
+        lastUpdatedBy: profile.uid,
+        lastUpdatedByName: profile.displayName,
+        lastUpdatedAt: serverTimestamp()
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${userId}`, user);
     }
@@ -1048,19 +1158,19 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className={cn("min-h-screen font-sans transition-colors duration-500", `bg-${themeColor.bg}`, `selection:bg-${themeColor.primary}/20`)}>
+      <div className={cn("min-h-screen font-sans transition-colors duration-500", themeColor.bg, "selection:bg-slate-200")}>
         {/* Header */}
         <header className={cn(
           "sticky top-0 z-50 transition-all duration-500 border-b backdrop-blur-md",
           profile?.role === 'admin' 
             ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/10" 
-            : cn("bg-white/80 border-slate-200", `border-${themeColor.primary}/20`)
+            : cn("bg-white/80 border-slate-200", themeColor.border)
         )}>
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className={cn(
                 "w-10 h-10 rounded-2xl flex items-center justify-center transition-all shadow-lg transform hover:scale-105",
-                profile?.role === 'admin' ? "bg-white text-emerald-600" : `bg-${themeColor.primary} text-white shadow-current/20`
+                profile?.role === 'admin' ? "bg-white text-emerald-600" : `${themeColor.bgPrimary} text-white shadow-current/20`
               )}>
                 <CalendarIcon className="w-6 h-6" />
               </div>
@@ -1071,7 +1181,7 @@ export default function App() {
                 )}>Suivi de Présence</span>
                 <span className={cn(
                   "text-[10px] font-black uppercase tracking-[0.2em] hidden sm:inline opacity-70",
-                  profile?.role === 'admin' ? "text-emerald-50" : `text-${themeColor.text}`
+                  profile?.role === 'admin' ? "text-emerald-50" : themeColor.text
                 )}>Système de Gestion</span>
               </div>
             </div>
@@ -1085,7 +1195,7 @@ export default function App() {
                   <span className={cn("font-semibold", profile?.role === 'admin' ? "text-white" : "text-slate-700")}>{profile?.displayName}</span>
                   <span className={cn(
                     "text-xs capitalize flex items-center gap-1 font-bold",
-                    profile?.role === 'admin' ? "text-emerald-100" : `text-${themeColor.primary}`
+                    profile?.role === 'admin' ? "text-emerald-100" : themeColor.textPrimary
                   )}>
                     {profile?.role === 'admin' && <ShieldCheck className="w-3 h-3" />}
                     {profile?.role === 'superviseur' && <ShieldCheck className="w-3 h-3 text-purple-500" />}
@@ -1100,7 +1210,7 @@ export default function App() {
                   alt="Avatar" 
                   className={cn(
                     "w-10 h-10 rounded-full border-2",
-                    profile?.role === 'admin' ? "border-white/50" : `border-${themeColor.ring}`
+                    profile?.role === 'admin' ? "border-white/50" : themeColor.border
                   )}
                   referrerPolicy="no-referrer"
                 />
@@ -1128,12 +1238,12 @@ export default function App() {
             <div className="lg:col-span-4 space-y-8">
               {/* Check-In/Out Card (User Only) */}
               {profile?.role !== 'admin' && profile?.role !== 'superviseur' && (
-                <div className={cn("bg-white p-6 rounded-[2rem] shadow-xl border overflow-hidden relative transition-all duration-500", `shadow-${themeColor.primary}/10 border-${themeColor.ring}`)}>
+                <div className={cn("bg-white p-6 rounded-[2rem] shadow-xl border overflow-hidden relative transition-all duration-500", `${themeColor.shadow} ${themeColor.border}`)}>
                   <div className="absolute top-0 right-0 p-4 opacity-5">
                     <Clock className="w-24 h-24" />
                   </div>
                   <h2 className="font-bold text-lg flex items-center gap-2 mb-6">
-                    <Clock className={cn("w-5 h-5", `text-${themeColor.primary}`)} />
+                    <Clock className={cn("w-5 h-5", themeColor.textPrimary)} />
                     Suivi Quotidien
                   </h2>
 
@@ -1168,11 +1278,11 @@ export default function App() {
                       <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500 shadow-sm", `bg-${themeColor.bg} border-${themeColor.ring}`)}
+                        className={cn("p-4 rounded-2xl border flex items-center justify-between transition-all duration-500 shadow-sm", `${themeColor.bg} ${themeColor.border}`)}
                       >
                         <div>
                           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Paie Actualisée</div>
-                          <div className={cn("text-xl font-black", `text-${themeColor.primary}`)}>
+                          <div className={cn("text-xl font-black", themeColor.textPrimary)}>
                             {((workerStats?.[profile.uid]?.totalPay || 0)).toLocaleString()} FCFA
                           </div>
                         </div>
@@ -1192,7 +1302,7 @@ export default function App() {
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="font-bold text-lg flex items-center gap-2">
-                    <CalendarIcon className={cn("w-5 h-5", `text-${roleColor.primary}`)} />
+                    <CalendarIcon className={cn("w-5 h-5", themeColor.textPrimary)} />
                     Calendrier
                   </h2>
                   <div className="flex items-center gap-3">
@@ -1252,8 +1362,8 @@ export default function App() {
                             onClick={() => setSelectedDate(day)}
                             className={cn(
                               "aspect-square flex items-center justify-center text-sm rounded-xl transition-all relative",
-                              isSelected ? `bg-${themeColor.primary} text-white shadow-md shadow-${themeColor.primary}/20` : "hover:bg-slate-50",
-                              !isSelected && isTodayDate && `text-${themeColor.primary} font-bold ring-2 ring-${themeColor.ring}`
+                              isSelected ? `${themeColor.bgPrimary} text-white shadow-md ${themeColor.shadow}` : "hover:bg-slate-50",
+                              !isSelected && isTodayDate && `${themeColor.textPrimary} font-bold ring-2 ${themeColor.ring}`
                             )}
                           >
                             {format(day, 'd')}
@@ -1289,19 +1399,19 @@ export default function App() {
             {/* Right Column: Main Content */}
             <div className="lg:col-span-8">
               {isAdminOrSuper ? (
-                <div className={cn("bg-white rounded-3xl shadow-xl border overflow-hidden transition-all duration-500", `border-${themeColor.primary}/20 shadow-${themeColor.primary}/5`)}>
-                  <div className={cn("p-6 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4", `border-${themeColor.primary}/10`, `bg-${themeColor.bg}/20`)}>
+                <div className={cn("bg-white rounded-3xl shadow-xl border overflow-hidden transition-all duration-500", `${themeColor.border} ${themeColor.shadow}`)}>
+                  <div className={cn("p-6 border-b flex flex-col sm:flex-row sm:items-center justify-between gap-4", themeColor.border, `${themeColor.bg} opacity-80`)}>
                     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                       <div>
                         <h2 className="text-xl font-bold flex items-center gap-2">
-                          <Users className={cn("w-6 h-6", `text-${themeColor.primary}`)} />
+                          <Users className={cn("w-6 h-6", themeColor.textPrimary)} />
                           Marquer la présence
                         </h2>
                         <p className="text-slate-500 text-sm capitalize">Marquage pour {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}</p>
                       </div>
                     </div>
                     {isToday(selectedDate) && (
-                      <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `bg-${themeColor.primary} text-white`)}>Aujourd'hui</span>
+                      <span className={cn("px-3 py-1 text-xs font-bold rounded-full self-start sm:self-auto uppercase shadow-sm", `${themeColor.bgPrimary} text-white`)}>Aujourd'hui</span>
                     )}
                   </div>
 
@@ -1314,7 +1424,7 @@ export default function App() {
                       onClick={() => setRoleFilter('all')}
                       className={cn(
                         "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
-                        roleFilter === 'all' ? `bg-${themeColor.primary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
+                        roleFilter === 'all' ? `${themeColor.bgPrimary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
                       )}
                     >
                       Tous
@@ -1325,7 +1435,7 @@ export default function App() {
                         onClick={() => setRoleFilter(role)}
                         className={cn(
                           "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all",
-                          roleFilter === role ? `bg-${ROLE_COLORS[role].primary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
+                          roleFilter === role ? `${ROLE_COLORS[role].bgPrimary} text-white shadow-md` : "bg-white text-slate-400 border border-slate-200 hover:border-slate-300"
                         )}
                       >
                         {role}s
@@ -1360,7 +1470,7 @@ export default function App() {
                                   alt={u.displayName} 
                                   className={cn("w-12 h-12 rounded-2xl bg-slate-100 group-hover:ring-2 transition-all", `group-hover:ring-${uColor.primary}/40`)}
                                 />
-                                <div className={cn("absolute inset-0 flex items-center justify-center rounded-2xl transition-all", `bg-${uColor.primary}/0 group-hover:bg-${uColor.primary}/20`)}>
+                                <div className={cn("absolute inset-0 flex items-center justify-center rounded-2xl transition-all", "bg-slate-900/0 group-hover:bg-slate-900/10")}>
                                   <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-all" />
                                 </div>
                               </button>
@@ -1388,7 +1498,7 @@ export default function App() {
                                   </div>
                                   <div className={cn(
                                     "px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest",
-                                    `bg-${uColor.bg} text-${uColor.text}`
+                                    uColor.bg, uColor.text
                                   )}>
                                     {u.role}
                                   </div>
@@ -1446,7 +1556,7 @@ export default function App() {
                                       className={cn(
                                         "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
                                         record?.checkIn 
-                                          ? `bg-${uColor.bg} text-${uColor.text} hover:bg-${uColor.ring}` 
+                                          ? `${uColor.bg} ${uColor.text} hover:${uColor.ring}` 
                                           : "bg-slate-50 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"
                                       )}
                                     >
@@ -1514,6 +1624,12 @@ export default function App() {
                                     <XCircle className="w-4 h-4" />
                                   </button>
                                 </div>
+                                {record?.updatedByName && (
+                                  <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
+                                    <ShieldCheck className="w-2 h-2" />
+                                    {record.updatedByName} • {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
+                                  </div>
+                                )}
                               </div>
 
                               {/* Admin & Superviseur: Role & Rate management */}
@@ -1556,6 +1672,12 @@ export default function App() {
                                       />
                                     </div>
                                   )}
+                                  {u.lastUpdatedByName && (
+                                    <div className="text-[8px] text-slate-400 italic flex items-center gap-1 ml-auto">
+                                      <ShieldCheck className="w-2 h-2" />
+                                      {u.lastUpdatedByName} • {format(u.lastUpdatedAt?.toDate() || new Date(), 'dd/MM HH:mm')}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1587,10 +1709,10 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-8">
-                  <div className={cn("bg-white p-8 rounded-3xl shadow-sm border", `border-${roleColor.ring}`)}>
+                  <div className={cn("bg-white p-8 rounded-3xl shadow-sm border", themeColor.border)}>
                     <div className="flex items-center justify-between mb-6">
                       <h2 className="text-2xl font-bold">Votre historique</h2>
-                      <div className={cn("px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest", `bg-${roleColor.bg} text-${roleColor.text}`)}>
+                      <div className={cn("px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest", themeColor.bg, themeColor.text)}>
                         {profile?.role}
                       </div>
                     </div>
