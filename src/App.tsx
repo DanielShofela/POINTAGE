@@ -876,11 +876,11 @@ const UserDetailModal = ({
                                   {format(day, 'EEEE d MMMM yyyy', { locale: fr })}
                                 </div>
                                 <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn?.toDate ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
                                   <ArrowRightLeft className="w-2 h-2" />
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut?.toDate ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
                                 </div>
-                                {record?.updatedByName && (
+                                {record?.updatedByName && record?.timestamp?.toDate && (
                                   <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
                                     <ShieldCheck className="w-2 h-2" />
                                     Modifié par {record.updatedByName} le {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
@@ -1893,13 +1893,13 @@ export default function App() {
                       <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                         <div className="text-xs text-slate-400 font-bold uppercase mb-1">Arrivée</div>
                         <div className="text-lg font-black text-slate-700">
-                          {todayRecord?.checkIn ? format(todayRecord.checkIn.toDate(), 'HH:mm') : '--:--'}
+                          {todayRecord?.checkIn?.toDate ? format(todayRecord.checkIn.toDate(), 'HH:mm') : '--:--'}
                         </div>
                       </div>
                       <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                         <div className="text-xs text-slate-400 font-bold uppercase mb-1">Départ</div>
                         <div className="text-lg font-black text-slate-700">
-                          {todayRecord?.checkOut ? format(todayRecord.checkOut.toDate(), 'HH:mm') : '--:--'}
+                          {todayRecord?.checkOut?.toDate ? format(todayRecord.checkOut.toDate(), 'HH:mm') : '--:--'}
                         </div>
                       </div>
                     </div>
@@ -2209,7 +2209,7 @@ export default function App() {
                                   ) : (
                                     <button 
                                       onClick={() => {
-                                        if (record?.checkIn) {
+                                        if (record?.checkIn?.toDate) {
                                           setEditingTime({ userId: u.uid, type: 'checkIn' });
                                           setTempTime(format(record.checkIn.toDate(), 'HH:mm'));
                                         } else {
@@ -2224,7 +2224,7 @@ export default function App() {
                                       )}
                                     >
                                       <Clock className="w-3 h-3" />
-                                      {record?.checkIn ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
+                                      {record?.checkIn?.toDate ? "Arr : " + format(record.checkIn.toDate(), 'HH:mm') : "Arrivée"}
                                     </button>
                                   )}
 
@@ -2255,7 +2255,7 @@ export default function App() {
                                   ) : (
                                     <button 
                                       onClick={() => {
-                                        if (record?.checkOut) {
+                                        if (record?.checkOut?.toDate) {
                                           setEditingTime({ userId: u.uid, type: 'checkOut' });
                                           setTempTime(format(record.checkOut.toDate(), 'HH:mm'));
                                         } else {
@@ -2270,7 +2270,7 @@ export default function App() {
                                       )}
                                     >
                                       <Clock className="w-3 h-3" />
-                                      {record?.checkOut ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
+                                      {record?.checkOut?.toDate ? "Dép : " + format(record.checkOut.toDate(), 'HH:mm') : "Départ"}
                                     </button>
                                   )}
                                   
@@ -2287,7 +2287,7 @@ export default function App() {
                                     <XCircle className="w-4 h-4" />
                                   </button>
                                 </div>
-                                {record?.updatedByName && (
+                                {record?.updatedByName && record?.timestamp?.toDate && (
                                   <div className="text-[8px] text-slate-400 italic mt-0.5 flex items-center gap-1">
                                     <ShieldCheck className="w-2 h-2" />
                                     {record.updatedByName} • {format(record.timestamp.toDate(), 'dd/MM HH:mm')}
@@ -2400,9 +2400,9 @@ export default function App() {
                               <div>
                                 <div className="font-bold capitalize text-sm">{format(day, 'EEEE d MMMM yyyy', { locale: fr })}</div>
                                 <div className="flex items-center gap-3 text-[10px] font-bold text-slate-400 uppercase">
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkIn?.toDate ? format(record.checkIn.toDate(), 'HH:mm') : '--:--'}</span>
                                   <ArrowRightLeft className="w-2 h-2" />
-                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
+                                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {record?.checkOut?.toDate ? format(record.checkOut.toDate(), 'HH:mm') : '--:--'}</span>
                                 </div>
                               </div>
                             </div>
