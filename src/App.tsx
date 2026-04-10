@@ -370,7 +370,9 @@ const ProfileModal = ({
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [photoURL, setPhotoURL] = useState(profile?.photoURL || user?.photoURL || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (profile) {
@@ -379,30 +381,80 @@ const ProfileModal = ({
     }
   }, [profile, user]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError("Veuillez sélectionner une image valide.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError("L'image est trop volumineuse (max 2Mo).");
+      return;
+    }
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const storageRef = ref(storage, `avatars/${user.uid}/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      setPhotoURL(downloadURL);
+    } catch (err: any) {
+      console.error('Error uploading file:', err);
+      setError("Erreur lors de l'importation de l'image.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !profile) return;
+    
+    if (!displayName.trim()) {
+      setError("Le nom ne peut pas être vide.");
+      return;
+    }
     
     setIsSaving(true);
     setError(null);
     
     try {
       // Update Auth Profile
-      await updateProfile(user, {
-        displayName: displayName,
-        photoURL: photoURL
-      });
+      try {
+        await updateProfile(user, {
+          displayName: displayName,
+          photoURL: photoURL
+        });
+      } catch (authErr: any) {
+        console.error('Error updating Auth profile:', authErr);
+      }
       
       // Update Firestore Profile
-      await updateDoc(doc(db, 'users', user.uid), {
-        displayName: displayName,
-        photoURL: photoURL
-      });
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          displayName: displayName,
+          photoURL: photoURL,
+          lastUpdatedAt: Timestamp.now(),
+          lastUpdatedBy: user.uid,
+          lastUpdatedByName: displayName
+        });
+      } catch (fsErr: any) {
+        handleFirestoreError(fsErr, OperationType.UPDATE, `users/${user.uid}`, user);
+      }
       
       onClose();
     } catch (err: any) {
       console.error('Error updating profile:', err);
-      setError("Une erreur est survenue lors de la mise à jour du profil.");
+      if (err.message && err.message.includes('{')) {
+        // This is likely a JSON error from handleFirestoreError
+        setError("Erreur de permission ou de données. Veuillez vérifier vos informations.");
+      } else {
+        setError("Une erreur est survenue lors de la mise à jour du profil.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -426,16 +478,32 @@ const ProfileModal = ({
                 <XCircle className="w-6 h-6 text-slate-400" />
               </button>
               
-              <div className="relative inline-block mb-4">
+              <div className="relative inline-block mb-4 group">
                 <img 
                   src={photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.uid}`} 
                   alt="Avatar" 
-                  className={cn("w-24 h-24 rounded-full border-4 shadow-lg", themeColor.border)}
+                  className={cn("w-24 h-24 rounded-full border-4 shadow-lg object-cover", themeColor.border)}
                   referrerPolicy="no-referrer"
                 />
-                <div className={cn("absolute -bottom-1 -right-1 p-2 rounded-full shadow-md", `${themeColor.bgPrimary} text-white`)}>
-                  <UserIcon className="w-4 h-4" />
-                </div>
+                <button 
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className={cn(
+                    "absolute -bottom-1 -right-1 p-2 rounded-full shadow-md transition-all hover:scale-110 active:scale-95",
+                    `${themeColor.bgPrimary} text-white`,
+                    isUploading && "animate-pulse opacity-70"
+                  )}
+                >
+                  {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                </button>
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  accept="image/*"
+                />
               </div>
               
               <h2 className="text-2xl font-black text-slate-800">Mon Profil</h2>
@@ -472,15 +540,25 @@ const ProfileModal = ({
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">URL de la photo</label>
-                <input 
-                  type="url" 
-                  value={photoURL}
-                  onChange={(e) => setPhotoURL(e.target.value)}
-                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all bg-slate-50/50"
-                  placeholder="https://exemple.com/photo.jpg"
-                />
-                <p className="text-[10px] text-slate-400 ml-1">Laissez vide pour utiliser un avatar généré automatiquement.</p>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Photo de profil</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="url" 
+                    value={photoURL}
+                    onChange={(e) => setPhotoURL(e.target.value)}
+                    className="flex-1 px-5 py-4 rounded-2xl border border-slate-200 outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all bg-slate-50/50"
+                    placeholder="https://exemple.com/photo.jpg"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 bg-slate-100 text-slate-600 rounded-2xl hover:bg-slate-200 transition-colors flex items-center justify-center"
+                    title="Importer une image"
+                  >
+                    <Upload className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 ml-1">Importez une image ou collez un lien. Laissez vide pour un avatar automatique.</p>
               </div>
 
               <div className="pt-4 flex gap-3">
@@ -533,16 +611,49 @@ const UserDetailModal = ({
   const [editName, setEditName] = useState('');
   const [editRoles, setEditRoles] = useState<UserRole[]>([]);
   const [editDailyRate, setEditDailyRate] = useState<number>(0);
+  const [editPhotoURL, setEditPhotoURL] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (userProfile) {
       setEditName(userProfile.displayName);
       setEditRoles(userProfile.roles || [userProfile.role]);
       setEditDailyRate(userProfile.dailyRate || 0);
+      setEditPhotoURL(userProfile.photoURL || '');
       setIsEditing(false);
     }
   }, [userProfile]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userProfile) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError("Image invalide.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Image trop lourde (max 2Mo).");
+      return;
+    }
+
+    setIsUploading(true);
+    setError(null);
+    try {
+      const storageRef = ref(storage, `avatars/${userProfile.uid}/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      setEditPhotoURL(downloadURL);
+    } catch (err: any) {
+      console.error('Error uploading file:', err);
+      setError("Erreur d'importation.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const userRecords = useMemo(() => {
     if (!userProfile) return [];
@@ -588,7 +699,8 @@ const UserDetailModal = ({
         displayName: editName,
         roles: editRoles,
         role: editRoles[0],
-        dailyRate: editDailyRate
+        dailyRate: editDailyRate,
+        photoURL: editPhotoURL
       });
       setIsEditing(false);
     } catch (error) {
@@ -610,18 +722,41 @@ const UserDetailModal = ({
           >
             <div className={cn("p-6 border-b flex items-center justify-between text-white", uColor.bgPrimary)}>
               <div className="flex items-center gap-4">
-                <img 
-                  src={userProfile.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
-                  alt={userProfile.displayName} 
-                  className="w-12 h-12 rounded-2xl bg-white/20 object-cover"
-                />
+                <div className="relative group">
+                  <img 
+                    src={editPhotoURL || userProfile.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userProfile.uid}`} 
+                    alt={userProfile.displayName} 
+                    className="w-12 h-12 rounded-2xl bg-white/20 object-cover"
+                  />
+                  {isEditing && (
+                    <>
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
+                      </button>
+                      <input 
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        accept="image/*"
+                      />
+                    </>
+                  )}
+                </div>
                 <div>
                   {isEditing ? (
-                    <input 
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="bg-white/20 border-none rounded px-2 py-1 text-white font-bold text-xl outline-none focus:ring-2 focus:ring-white/50"
-                    />
+                    <div className="space-y-1">
+                      <input 
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="bg-white/20 border-none rounded px-2 py-1 text-white font-bold text-xl outline-none focus:ring-2 focus:ring-white/50"
+                      />
+                      {error && <p className="text-[10px] text-red-200 font-bold">{error}</p>}
+                    </div>
                   ) : (
                     <h3 className="font-bold text-xl">{userProfile.displayName}</h3>
                   )}
@@ -799,8 +934,40 @@ const CreateUserModal = ({
   const [password, setPassword] = useState('');
   const [roles, setRoles] = useState<UserRole[]>(['personnel']);
   const [dailyRate, setDailyRate] = useState<number>(0);
+  const [photoURL, setPhotoURL] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError("Veuillez sélectionner une image valide.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError("L'image est trop volumineuse (max 2Mo).");
+      return;
+    }
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const storageRef = ref(storage, `avatars/new_users/${Date.now()}_${file.name}`);
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      setPhotoURL(downloadURL);
+    } catch (err: any) {
+      console.error('Error uploading file:', err);
+      setError("Erreur lors de l'importation de l'image.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleToggleRole = (role: UserRole) => {
     if (roles.includes(role)) {
@@ -833,7 +1000,8 @@ const CreateUserModal = ({
         password,
         roles,
         role: roles[0],
-        dailyRate
+        dailyRate,
+        photoURL
       });
       onClose();
       // Reset form
@@ -842,6 +1010,7 @@ const CreateUserModal = ({
       setPassword('');
       setRoles(['personnel']);
       setDailyRate(0);
+      setPhotoURL('');
     } catch (err: any) {
       setError(err.message || "Erreur lors de la création du compte.");
     } finally {
@@ -879,6 +1048,33 @@ const CreateUserModal = ({
                   {error}
                 </div>
               )}
+
+              <div className="flex justify-center mb-6">
+                <div className="relative group">
+                  <div className="w-24 h-24 rounded-3xl bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center overflow-hidden">
+                    {photoURL ? (
+                      <img src={photoURL} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <Camera className="w-8 h-8 text-slate-300" />
+                    )}
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="absolute -bottom-2 -right-2 p-2 bg-emerald-600 text-white rounded-xl shadow-lg hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  </button>
+                  <input 
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    accept="image/*"
+                  />
+                </div>
+              </div>
 
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Nom Complet</label>
@@ -1390,6 +1586,7 @@ export default function App() {
         roles: data.roles,
         username: data.username,
         dailyRate: data.dailyRate,
+        photoURL: data.photoURL,
         suspended: false,
         createdAt: Timestamp.now(),
         lastUpdatedBy: user.uid,
